@@ -1,0 +1,8 @@
+agno[os]>=2.5.0
+openai>=1.0.0
+anthropic>=0.40.0
+python-dotenv>=1.0.0
+pymupdf>=1.27.0
+lancedb>=0.30.0
+pypdf>=6.0.0
+fastembed>=0.8.0

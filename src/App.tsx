@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import Header from './components/Header';
 import Sidebar from './components/Sidebar';
 import Dashboard from './components/Dashboard';
@@ -81,10 +81,43 @@ function App() {
   const hasAgentSelected = isAgentView && selectedAgentId;
   const hasSkillSelected = isSkillView && selectedSkillId;
 
+  // Resizable splitter for home view
+  const [homeSplitPercent, setHomeSplitPercent] = useState(70);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const dragging = useRef(false);
+
+  const handleMouseDown = useCallback(() => {
+    dragging.current = true;
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+  }, []);
+
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!dragging.current || !containerRef.current) return;
+      const rect = containerRef.current.getBoundingClientRect();
+      const pct = ((e.clientX - rect.left) / rect.width) * 100;
+      setHomeSplitPercent(Math.min(85, Math.max(30, pct)));
+    };
+    const handleMouseUp = () => {
+      if (dragging.current) {
+        dragging.current = false;
+        document.body.style.cursor = '';
+        document.body.style.userSelect = '';
+      }
+    };
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, []);
+
   return (
     <div className="h-screen flex flex-col bg-bg">
       <Header />
-      <div className="flex-1 flex overflow-hidden">
+      <div className="flex-1 flex overflow-hidden" ref={containerRef}>
         <Sidebar
           activeView={activeView}
           activeProjectId={activeProjectId}
@@ -95,10 +128,14 @@ function App() {
 
         {isHomeView ? (
           <>
-            <div className="flex-[3] min-w-0 overflow-hidden">
+            <div className="min-w-0 overflow-hidden" style={{ width: `${homeSplitPercent}%` }}>
               <Dashboard />
             </div>
-            <div className="flex-1 min-w-0 overflow-hidden">
+            <div
+              onMouseDown={handleMouseDown}
+              className="w-1 shrink-0 bg-border hover:bg-primary cursor-col-resize transition-colors"
+            />
+            <div className="min-w-0 overflow-hidden flex-1">
               <GlobalChat />
             </div>
           </>

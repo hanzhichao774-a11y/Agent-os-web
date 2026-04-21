@@ -378,13 +378,18 @@ AGENT_CONFIGS: dict[str, dict] = {
         "name": "全局助手",
         "avatar": "🌐",
         "description": "效能管理智能体，管理项目、Agent 和 Skill 资源",
-        "capabilities": ["资源调度", "效能分析", "计算器"],
+        "capabilities": ["资源查询", "效能分析", "计算器"],
         "builtin_tools": ["calculator"],
         "instructions": [
-            "你是效能管理智能体「全局助手」，帮助用户管理项目、Agent 和 Skill 资源。",
-            "你可以使用计算器来辅助计算。",
-            "可以搜索资源、分析效能指标、提供风险预警和任务创建建议。",
-            "回答要简洁实用，必要时使用列表格式。",
+            "你是「全局助手」，帮助用户查询和管理系统中的 Agent、技能、项目和知识库资源。",
+            "你有以下工具可用：",
+            "- _global_list_agents：列出所有 Agent",
+            "- _global_list_skills：列出所有技能",
+            "- _global_list_projects：列出所有项目",
+            "- _global_list_knowledge_docs：列出知识库文档",
+            "- _global_system_stats：获取系统统计概览",
+            "当用户询问 Agent、技能、项目、知识库相关信息时，主动调用对应工具获取实时数据，不要凭空编造。",
+            "回答要简洁实用，使用列表或表格格式呈现结构化数据。",
             "始终使用中文回答。",
         ],
     },
@@ -422,6 +427,83 @@ AGENT_CONFIGS: dict[str, dict] = {
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# 全局助手 Tool Functions（查询系统资源）
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _global_list_agents() -> str:
+    """列出系统中所有可用的 Agent 及其能力描述。"""
+    lines = []
+    for aid, cfg in AGENT_CONFIGS.items():
+        if aid == "skill_engineer":
+            continue
+        tools = cfg.get("builtin_tools", [])
+        custom = [sid for sid in _agent_tools.get(aid, []) if sid in _skill_registry]
+        tool_str = ", ".join(tools + custom) if (tools or custom) else "无"
+        lines.append(f"- **{cfg['name']}** (ID: {aid}): {cfg.get('description', '')} | 工具: {tool_str}")
+    return f"当前系统共有 {len(lines)} 个 Agent：\n" + "\n".join(lines)
+
+
+def _global_list_skills() -> str:
+    """列出系统中所有已注册的技能。"""
+    scan_skills()
+    if not _skill_registry:
+        return "当前没有已注册的技能。"
+    lines = []
+    for s in _skill_registry.values():
+        meta = s["meta"]
+        mounted = [AGENT_CONFIGS[aid]["name"] for aid, sids in _agent_tools.items() if s["id"] in sids and aid in AGENT_CONFIGS]
+        mount_str = ", ".join(mounted) if mounted else "未挂载"
+        lines.append(f"- **{meta['name']}** (ID: {s['id']}): {meta.get('description', '')} | 挂载: {mount_str}")
+    return f"当前系统共有 {len(lines)} 个技能：\n" + "\n".join(lines)
+
+
+def _global_list_projects() -> str:
+    """列出系统中所有项目。"""
+    conn = _get_projects_conn()
+    rows = conn.execute("SELECT id, name, description, status, created_at FROM projects ORDER BY created_at DESC").fetchall()
+    if not rows:
+        return "当前没有项目。"
+    lines = []
+    for r in rows:
+        lines.append(f"- **{r[1]}** (ID: {r[0]}): {r[2]} | 状态: {r[3]}")
+    return f"当前系统共有 {len(lines)} 个项目：\n" + "\n".join(lines)
+
+
+def _global_list_knowledge_docs() -> str:
+    """列出知识库中已上传的文档。"""
+    docs = list_documents()
+    if not docs:
+        return "知识库当前没有文档。"
+    lines = [f"- {d['doc_name']} ({d['chunks']} 个段落)" for d in docs]
+    return f"知识库共有 {len(lines)} 个文档：\n" + "\n".join(lines)
+
+
+def _global_system_stats() -> str:
+    """获取系统整体统计概览。"""
+    scan_skills()
+    agent_count = sum(1 for k in AGENT_CONFIGS if k != "skill_engineer")
+    skill_count = len(_skill_registry)
+    docs = list_documents()
+    workspace_files = list(WORKSPACE_DIR.glob("*")) if WORKSPACE_DIR.exists() else []
+    return (
+        f"系统概览：\n"
+        f"- Agent 数量: {agent_count}\n"
+        f"- 技能数量: {skill_count}\n"
+        f"- 知识库文档: {len(docs)}\n"
+        f"- 工作区文件: {len(workspace_files)}"
+    )
+
+
+_GLOBAL_TOOLS = [
+    _global_list_agents,
+    _global_list_skills,
+    _global_list_projects,
+    _global_list_knowledge_docs,
+    _global_system_stats,
+]
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # Agent 实例管理
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -451,6 +533,9 @@ def get_agent(agent_id: str) -> Agent | None:
         builtin = _make_builtin_tools(config.get("builtin_tools", []))
         custom = _build_skill_tools(agent_id)
         all_tools = builtin + custom
+
+        if agent_id == "global":
+            all_tools = all_tools + _GLOBAL_TOOLS
 
         kwargs = {}
         if config.get("has_knowledge"):

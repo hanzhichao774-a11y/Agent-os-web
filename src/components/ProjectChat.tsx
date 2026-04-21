@@ -80,6 +80,7 @@ export default function ProjectChat({ projectId, projectName, projectDescription
   const sessionId = useRef(`team_${projectId}_${Date.now()}`);
   const bottomRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const memberMsgIds = useRef(new Map<string, string>());
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -113,7 +114,7 @@ export default function ProjectChat({ projectId, projectName, projectDescription
     onUpdateTeamSteps(() => [{ name: 'Leader 分析', agent: 'Team Leader', status: 'in-progress', time: now(), startedAt: Date.now() }]);
 
     const leaderMsgId = `leader_${Date.now()}`;
-    const memberMsgIds = new Map<string, string>();
+    memberMsgIds.current = new Map<string, string>();
     let leaderStepAdded = false;
 
     try {
@@ -150,9 +151,9 @@ export default function ProjectChat({ projectId, projectName, projectDescription
 
         } else if (event.type === 'member_started') {
           const agentName = event.agent_name || '成员';
-          if (!memberMsgIds.has(agentName)) {
+          if (!memberMsgIds.current.has(agentName)) {
             const msgId = `member_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-            memberMsgIds.set(agentName, msgId);
+            memberMsgIds.current.set(agentName, msgId);
             setMessages(prev => [...prev, {
               id: msgId,
               role: 'member',
@@ -167,10 +168,10 @@ export default function ProjectChat({ projectId, projectName, projectDescription
 
         } else if (event.type === 'member_streaming') {
           const agentName = event.agent_name || '成员';
-          let msgId = memberMsgIds.get(agentName);
+          let msgId = memberMsgIds.current.get(agentName);
           if (!msgId) {
             msgId = `member_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-            memberMsgIds.set(agentName, msgId);
+            memberMsgIds.current.set(agentName, msgId);
             setMessages(prev => [...prev, {
               id: msgId!,
               role: 'member',
@@ -188,10 +189,10 @@ export default function ProjectChat({ projectId, projectName, projectDescription
 
         } else if (event.type === 'member_response') {
           const agentName = event.agent_name || '成员';
-          let msgId = memberMsgIds.get(agentName);
+          let msgId = memberMsgIds.current.get(agentName);
           if (!msgId) {
             msgId = `member_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-            memberMsgIds.set(agentName, msgId);
+            memberMsgIds.current.set(agentName, msgId);
             setMessages(prev => [...prev, {
               id: msgId!,
               role: 'member',
@@ -276,7 +277,7 @@ export default function ProjectChat({ projectId, projectName, projectDescription
           </div>
           <div>
             <h2 className="font-semibold text-text text-sm">{projectName}</h2>
-            <p className="text-xs text-text-muted">{projectDescription} · Team Coordinate 模式</p>
+            <p className="text-xs text-text-muted">{projectDescription} · Team Route 模式</p>
           </div>
         </div>
         <div className="flex items-center gap-1 text-xs text-text-muted">
@@ -361,10 +362,10 @@ export default function ProjectChat({ projectId, projectName, projectDescription
             </div>
           );
         })}
-        {isLoading && messages[messages.length - 1]?.content === '' && (
+        {isLoading && !memberMsgIds.current.size && messages[messages.length - 1]?.content === '' && (
           <div className="flex items-center gap-2 text-xs text-text-muted pl-11">
             <Loader2 className="w-3 h-3 animate-spin" />
-            Team Leader 正在协调各 Agent...
+            Team Leader 正在分析问题并选择 Agent...
           </div>
         )}
         <div ref={bottomRef} />

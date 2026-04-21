@@ -1,9 +1,9 @@
 import { useState } from 'react';
 import {
   Home, Bot, Wrench, Settings, HelpCircle, Plus,
-  ChevronLeft, ChevronRight, GitBranch
+  ChevronLeft, ChevronRight, GitBranch, Trash2
 } from 'lucide-react';
-import { createProject } from '../services/api';
+import { createProject, deleteProject } from '../services/api';
 import type { ProjectInfo } from '../services/api';
 
 interface SidebarProps {
@@ -61,6 +61,16 @@ export default function Sidebar({ activeView, activeProjectId, onNavigate, proje
     } finally {
       setCreating(false);
     }
+  };
+
+  const handleDeleteProject = async (e: React.MouseEvent, projectId: string) => {
+    e.stopPropagation();
+    if (!confirm('确认删除此项目？')) return;
+    await deleteProject(projectId);
+    if (activeProjectId === projectId) {
+      onNavigate('home');
+    }
+    onRefreshProjects();
   };
 
   return (
@@ -126,7 +136,7 @@ export default function Sidebar({ activeView, activeProjectId, onNavigate, proje
                 key={project.id}
                 onClick={() => onNavigate('project', project.id)}
                 title={collapsed ? project.name : undefined}
-                className={`w-full flex items-center rounded-lg text-left transition-colors ${
+                className={`w-full flex items-center rounded-lg text-left transition-colors group/proj ${
                   collapsed
                     ? 'justify-center px-2 py-2'
                     : 'items-start gap-2 px-2 py-1.5'
@@ -147,6 +157,15 @@ export default function Sidebar({ activeView, activeProjectId, onNavigate, proje
                     </div>
                     <div className="text-[11px] text-text-muted truncate">{formatTime(project.updated_at)}</div>
                   </div>
+                )}
+                {!collapsed && (
+                  <button
+                    onClick={(e) => handleDeleteProject(e, project.id)}
+                    className="p-0.5 rounded hover:bg-error/10 text-text-muted hover:text-error opacity-0 group-hover/proj:opacity-100 transition-all shrink-0 mt-0.5"
+                    title="删除项目"
+                  >
+                    <Trash2 className="w-3 h-3" />
+                  </button>
                 )}
               </button>
             );

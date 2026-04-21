@@ -58,7 +58,10 @@ function MarkdownContent({ content }: { content: string }) {
 }
 
 export default function SkillChat({ skillId, onClose }: SkillChatProps) {
-  const [skill, setSkill] = useState<SkillInfo | null>(null);
+  const isCreateMode = skillId === '_new';
+  const [skill, setSkill] = useState<SkillInfo | null>(
+    isCreateMode ? { id: '_new', name: '新建技能', icon: '✨', category: '', description: '', params: [] } : null
+  );
   const [messages, setMessages] = useState<ChatMsg[]>([]);
   const [input, setInput] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
@@ -73,6 +76,23 @@ export default function SkillChat({ skillId, onClose }: SkillChatProps) {
   }, [messages]);
 
   useEffect(() => {
+    if (isCreateMode) {
+      setMessages([
+        {
+          id: '1',
+          role: 'system',
+          content: '技能创建模式',
+          timestamp: now(),
+        },
+        {
+          id: '2',
+          role: 'assistant',
+          content: '你好！我是技能管理助手。\n\n请用自然语言描述你想要创建的技能，例如：\n- 创建一个计算复利的技能\n- 帮我做一个查询天气的技能\n- 我需要一个文本翻译工具\n\n我会自动生成代码并注册到系统中。',
+          timestamp: now(),
+        },
+      ]);
+      return;
+    }
     fetchSkills().then((skills) => {
       const found = skills.find(s => s.id === skillId);
       if (found) {
@@ -104,11 +124,12 @@ export default function SkillChat({ skillId, onClose }: SkillChatProps) {
   const now = () => new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
 
   const refreshSkill = useCallback(() => {
+    if (isCreateMode) return;
     fetchSkills().then((skills) => {
       const found = skills.find(s => s.id === skillId);
       if (found) setSkill(found);
     });
-  }, [skillId]);
+  }, [skillId, isCreateMode]);
 
   const handleSend = async (text?: string) => {
     const msg = (text || input).trim();
@@ -165,14 +186,16 @@ export default function SkillChat({ skillId, onClose }: SkillChatProps) {
     }
   };
 
-  if (!skill) return <div className="h-full flex items-center justify-center text-text-muted text-sm">加载中...</div>;
+  if (!skill && !isCreateMode) return <div className="h-full flex items-center justify-center text-text-muted text-sm">加载中...</div>;
 
-  const quickActions = [
-    ...SUGGESTIONS_MAP.mounted?.slice(0, 1) || [],
-    ...SUGGESTIONS_MAP.execute?.slice(0, 1) || [],
-    ...SUGGESTIONS_MAP.modify?.slice(0, 1) || [],
-    ...SUGGESTIONS_MAP.create?.slice(0, 1) || [],
-  ];
+  const quickActions = isCreateMode
+    ? ['创建一个计算BMI的技能', '帮我做一个文本翻译工具', '创建一个查询天气的技能']
+    : [
+        ...SUGGESTIONS_MAP.mounted?.slice(0, 1) || [],
+        ...SUGGESTIONS_MAP.execute?.slice(0, 1) || [],
+        ...SUGGESTIONS_MAP.modify?.slice(0, 1) || [],
+        ...SUGGESTIONS_MAP.create?.slice(0, 1) || [],
+      ];
 
   return (
     <div className="h-full flex flex-col bg-bg border-l border-border">
@@ -186,12 +209,14 @@ export default function SkillChat({ skillId, onClose }: SkillChatProps) {
           </div>
         </div>
         <div className="flex items-center gap-1">
-          <button
-            onClick={() => setShowConfig(!showConfig)}
-            className={`p-1.5 rounded-lg transition-colors ${showConfig ? 'bg-primary-light text-primary-dark' : 'hover:bg-bg text-text-muted'}`}
-          >
-            <Settings className="w-4 h-4" />
-          </button>
+          {!isCreateMode && (
+            <button
+              onClick={() => setShowConfig(!showConfig)}
+              className={`p-1.5 rounded-lg transition-colors ${showConfig ? 'bg-primary-light text-primary-dark' : 'hover:bg-bg text-text-muted'}`}
+            >
+              <Settings className="w-4 h-4" />
+            </button>
+          )}
           <button onClick={onClose} className="p-1.5 hover:bg-bg rounded-lg transition-colors text-text-muted">
             <X className="w-4 h-4" />
           </button>

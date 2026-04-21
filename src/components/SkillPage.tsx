@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
-import { Plus, MessageSquare, Settings, Loader2, X, Trash2, Link } from 'lucide-react';
-import { fetchSkills, createSkill, deleteSkill, fetchAgents, setAgentTools } from '../services/api';
+import { Plus, MessageSquare, Settings, Loader2, X, Trash2 } from 'lucide-react';
+import { fetchSkills, deleteSkill, fetchAgents } from '../services/api';
 import type { SkillInfo, AgentInfo } from '../services/api';
 
 interface SkillPageProps {
@@ -16,29 +16,11 @@ const categoryConfig: Record<string, { label: string; color: string }> = {
   api: { label: 'API', color: 'bg-text-muted/10 text-text-muted' },
 };
 
-const CATEGORY_AGENT_MAP: Record<string, string[]> = {
-  data: ['a1'],
-  analysis: ['a1'],
-  code: ['a5'],
-  search: ['a2'],
-  api: ['a4'],
-};
-
 export default function SkillPage({ selectedSkillId, onSelectSkill }: SkillPageProps) {
   const [skillList, setSkillList] = useState<SkillInfo[]>([]);
   const [loading, setLoading] = useState(true);
-  const [showCreate, setShowCreate] = useState(false);
-  const [createDesc, setCreateDesc] = useState('');
-  const [creating, setCreating] = useState(false);
-  const [createError, setCreateError] = useState('');
   const [detailSkill, setDetailSkill] = useState<SkillInfo | null>(null);
   const [agents, setAgents] = useState<AgentInfo[]>([]);
-
-  // Mount suggest state
-  const [mountSuggest, setMountSuggest] = useState<{ skillId: string; skillName: string; category: string } | null>(null);
-  const [suggestAgents, setSuggestAgents] = useState<AgentInfo[]>([]);
-  const [suggestSelected, setSuggestSelected] = useState<string[]>([]);
-  const [mounting, setMounting] = useState(false);
 
   const loadSkills = async () => {
     setLoading(true);
@@ -48,52 +30,6 @@ export default function SkillPage({ selectedSkillId, onSelectSkill }: SkillPageP
   };
 
   useEffect(() => { loadSkills(); }, []);
-
-  const handleCreate = async () => {
-    if (!createDesc.trim() || creating) return;
-    setCreating(true);
-    setCreateError('');
-    const result = await createSkill(createDesc);
-    if (result.success && result.skill_id) {
-      setShowCreate(false);
-      setCreateDesc('');
-      await loadSkills();
-      // Trigger mount suggestion
-      const allAgents = await fetchAgents();
-      setAgents(allAgents);
-      const skills = await fetchSkills();
-      const newSkill = skills.find(s => s.id === result.skill_id);
-      if (newSkill) {
-        const cat = newSkill.category || 'api';
-        const recommended = CATEGORY_AGENT_MAP[cat] || [];
-        const recAgents = allAgents.filter(a => recommended.includes(a.id));
-        setSuggestAgents(allAgents);
-        setSuggestSelected(recAgents.map(a => a.id));
-        setMountSuggest({ skillId: newSkill.id, skillName: newSkill.name, category: cat });
-      }
-    } else {
-      setCreateError(result.error || '创建失败');
-    }
-    setCreating(false);
-  };
-
-  const handleMountConfirm = async () => {
-    if (!mountSuggest) return;
-    setMounting(true);
-    for (const agentId of suggestSelected) {
-      const agent = suggestAgents.find(a => a.id === agentId);
-      if (agent) {
-        const currentTools = [...agent.custom_tools];
-        if (!currentTools.includes(mountSuggest.skillId)) {
-          currentTools.push(mountSuggest.skillId);
-          await setAgentTools(agentId, currentTools);
-        }
-      }
-    }
-    setMounting(false);
-    setMountSuggest(null);
-    await loadSkills();
-  };
 
   const openDetail = async (skill: SkillInfo) => {
     setDetailSkill(skill);
@@ -120,113 +56,13 @@ export default function SkillPage({ selectedSkillId, onSelectSkill }: SkillPageP
             </p>
           </div>
           <button
-            onClick={() => setShowCreate(true)}
+            onClick={() => onSelectSkill('_new')}
             className="flex items-center gap-2 px-4 py-2 bg-primary text-white rounded-lg text-sm font-medium hover:bg-primary-dark transition-colors"
           >
             <Plus className="w-4 h-4" />
             新增 Skill
           </button>
         </div>
-
-        {/* Create Modal */}
-        {showCreate && (
-          <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50">
-            <div className="bg-surface border border-border rounded-2xl shadow-xl w-[480px] p-6 animate-fade-in">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-semibold text-text">创建新技能</h3>
-                <button onClick={() => { setShowCreate(false); setCreateError(''); }} className="p-1 hover:bg-bg rounded-lg">
-                  <X className="w-5 h-5 text-text-muted" />
-                </button>
-              </div>
-              <p className="text-sm text-text-secondary mb-3">
-                用自然语言描述你想要的技能，AI 会自动生成代码并注册。
-              </p>
-              <textarea
-                value={createDesc}
-                onChange={(e) => setCreateDesc(e.target.value)}
-                placeholder="例如：创建一个能根据年利率和本金计算复利的技能"
-                rows={3}
-                className="w-full bg-bg border border-border rounded-xl px-4 py-3 text-sm text-text outline-none focus:border-primary transition-colors resize-none mb-3"
-              />
-              {createError && (
-                <div className="text-xs text-error bg-error/10 border border-error/20 rounded-lg px-3 py-2 mb-3">{createError}</div>
-              )}
-              <div className="flex justify-end gap-2">
-                <button
-                  onClick={() => { setShowCreate(false); setCreateError(''); }}
-                  className="px-4 py-2 text-sm text-text-secondary hover:bg-bg rounded-lg transition-colors"
-                >
-                  取消
-                </button>
-                <button
-                  onClick={handleCreate}
-                  disabled={creating || !createDesc.trim()}
-                  className="flex items-center gap-2 px-4 py-2 bg-primary text-white rounded-lg text-sm font-medium hover:bg-primary-dark transition-colors disabled:opacity-50"
-                >
-                  {creating && <Loader2 className="w-4 h-4 animate-spin" />}
-                  {creating ? 'AI 生成中...' : '创建技能'}
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Mount Suggest Modal */}
-        {mountSuggest && (
-          <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50">
-            <div className="bg-surface border border-border rounded-2xl shadow-xl w-[480px] p-6 animate-fade-in">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-semibold text-text">挂载技能到 Agent</h3>
-                <button onClick={() => setMountSuggest(null)} className="p-1 hover:bg-bg rounded-lg">
-                  <X className="w-5 h-5 text-text-muted" />
-                </button>
-              </div>
-              <p className="text-sm text-text-secondary mb-4">
-                技能 <strong>{mountSuggest.skillName}</strong> 已创建成功！选择要挂载到的 Agent：
-              </p>
-              <div className="space-y-2 max-h-60 overflow-y-auto mb-4">
-                {suggestAgents.map(agent => {
-                  const isSelected = suggestSelected.includes(agent.id);
-                  const isRecommended = (CATEGORY_AGENT_MAP[mountSuggest.category] || []).includes(agent.id);
-                  return (
-                    <div
-                      key={agent.id}
-                      onClick={() => setSuggestSelected(prev => isSelected ? prev.filter(id => id !== agent.id) : [...prev, agent.id])}
-                      className={`flex items-center justify-between rounded-lg px-3 py-2 cursor-pointer transition-colors border ${
-                        isSelected ? 'bg-primary-light/50 border-primary/20' : 'bg-bg border-border hover:border-primary/30'
-                      }`}
-                    >
-                      <div className="flex items-center gap-2">
-                        <span className="text-base">{agent.avatar}</span>
-                        <div>
-                          <div className="text-sm font-medium text-text">{agent.name}</div>
-                          <div className="text-xs text-text-muted">{agent.builtin_tools.length} 内置工具 · {agent.custom_tools.length} 自定义技能</div>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-1.5">
-                        {isRecommended && <span className="text-[10px] bg-warning/10 text-warning px-1.5 py-0.5 rounded-full">推荐</span>}
-                        {isSelected && <span className="text-xs text-primary-dark font-medium">已选</span>}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-              <div className="flex justify-end gap-2">
-                <button onClick={() => setMountSuggest(null)} className="px-4 py-2 text-sm text-text-secondary hover:bg-bg rounded-lg transition-colors">
-                  跳过
-                </button>
-                <button
-                  onClick={handleMountConfirm}
-                  disabled={mounting || suggestSelected.length === 0}
-                  className="flex items-center gap-2 px-4 py-2 bg-primary text-white rounded-lg text-sm font-medium hover:bg-primary-dark transition-colors disabled:opacity-50"
-                >
-                  {mounting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Link className="w-4 h-4" />}
-                  {mounting ? '挂载中...' : `挂载到 ${suggestSelected.length} 个 Agent`}
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
 
         {/* Stats */}
         <div className="grid grid-cols-3 gap-4 mb-6">
@@ -251,7 +87,7 @@ export default function SkillPage({ selectedSkillId, onSelectSkill }: SkillPageP
           </div>
         ) : skillList.length === 0 ? (
           <div className="text-center py-20 text-text-muted text-sm">
-            暂无技能，点击「新增 Skill」用 AI 创建第一个技能
+            暂无技能，点击「新增 Skill」在右侧对话中创建
           </div>
         ) : (
           <div className="bg-surface border border-border rounded-xl overflow-hidden">

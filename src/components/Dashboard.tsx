@@ -1,138 +1,166 @@
 import { useState, useEffect } from 'react';
-import { Zap, AlertTriangle, Puzzle, Activity, BarChart3, Bot, Wrench, FileText, FolderOpen } from 'lucide-react';
-import { fetchStats, fetchAgents } from '../services/api';
-import type { StatsData, AgentInfo } from '../services/api';
+import { Bot, Wrench, FileText, FolderOpen, Layers } from 'lucide-react';
+import { fetchStats, fetchAgents, fetchSkills } from '../services/api';
+import type { StatsData, AgentInfo, SkillInfo } from '../services/api';
+
+interface StatCardProps {
+  label: string;
+  value: number | string;
+  icon: React.ReactNode;
+  color: string;
+  barPercent: number;
+}
+
+function StatCard({ label, value, icon, color, barPercent }: StatCardProps) {
+  return (
+    <div className="bg-surface border border-border rounded-xl p-3.5 relative overflow-hidden group hover:border-primary/30 transition-colors">
+      <div className="flex items-center justify-between mb-1.5">
+        <span className="text-xs text-text-secondary">{label}</span>
+        {icon}
+      </div>
+      <div className="text-2xl font-bold text-text mb-2">{value}</div>
+      <div className="h-1 bg-bg rounded-full overflow-hidden">
+        <div
+          className={`h-full rounded-full transition-all duration-700 ${color}`}
+          style={{ width: `${Math.min(100, barPercent)}%` }}
+        />
+      </div>
+    </div>
+  );
+}
 
 export default function Dashboard() {
   const [stats, setStats] = useState<StatsData | null>(null);
   const [agents, setAgents] = useState<AgentInfo[]>([]);
+  const [skills, setSkills] = useState<SkillInfo[]>([]);
 
   useEffect(() => {
     fetchStats().then(setStats);
     fetchAgents().then(setAgents);
+    fetchSkills().then(setSkills);
   }, []);
 
-  const toolAgents = agents.filter(a => a.builtin_tools.length > 0).length;
+  const maxStat = Math.max(
+    stats?.agents_count ?? 1,
+    stats?.skills_count ?? 1,
+    stats?.docs_count ?? 1,
+    stats?.workspace_files ?? 1,
+    1,
+  );
+
+  const skillCountByAgent = (agentId: string): number => {
+    return skills.filter(s => s.mounted_agents?.some(a => a.id === agentId)).length;
+  };
 
   return (
     <div className="h-full overflow-y-auto p-5">
-      <div className="max-w-5xl mx-auto">
-        <h2 className="text-base font-semibold text-text mb-4">效能管理仪表盘</h2>
-
-        <div className="grid grid-cols-2 gap-3 mb-4">
-          <div className="bg-surface border border-border rounded-xl p-3">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-xs text-text-secondary">Agent 总数</span>
-              <Bot className="w-3.5 h-3.5 text-primary" />
-            </div>
-            <div className="text-xl font-bold text-text">{stats?.agents_count ?? '...'}</div>
-            <div className="text-[11px] text-text-muted mt-0.5">{toolAgents} 个配置了工具</div>
-          </div>
-          <div className="bg-surface border border-border rounded-xl p-3">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-xs text-text-secondary">技能数量</span>
-              <Wrench className="w-3.5 h-3.5 text-success" />
-            </div>
-            <div className="text-xl font-bold text-text">{stats?.skills_count ?? '...'}</div>
-            <div className="text-[11px] text-text-muted mt-0.5">自定义 Python 技能</div>
-          </div>
-          <div className="bg-surface border border-border rounded-xl p-3">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-xs text-text-secondary">知识文档</span>
-              <FileText className="w-3.5 h-3.5 text-info" />
-            </div>
-            <div className="text-xl font-bold text-text">{stats?.docs_count ?? '...'}</div>
-            <div className="text-[11px] text-text-muted mt-0.5">已入库文档</div>
-          </div>
-          <div className="bg-surface border border-border rounded-xl p-3">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-xs text-text-secondary">工作区文件</span>
-              <FolderOpen className="w-3.5 h-3.5 text-warning" />
-            </div>
-            <div className="text-xl font-bold text-text">{stats?.workspace_files ?? '...'}</div>
-            <div className="text-[11px] text-text-muted mt-0.5">Agent 生成的文件</div>
+      <div className="max-w-5xl mx-auto space-y-5">
+        {/* Stats Cards */}
+        <div>
+          <h2 className="text-sm font-semibold text-text mb-3">系统概览</h2>
+          <div className="grid grid-cols-4 gap-3">
+            <StatCard
+              label="Agent"
+              value={stats?.agents_count ?? '...'}
+              icon={<Bot className="w-4 h-4 text-primary" />}
+              color="bg-primary"
+              barPercent={((stats?.agents_count ?? 0) / maxStat) * 100}
+            />
+            <StatCard
+              label="技能"
+              value={stats?.skills_count ?? '...'}
+              icon={<Wrench className="w-4 h-4 text-emerald-500" />}
+              color="bg-emerald-500"
+              barPercent={((stats?.skills_count ?? 0) / maxStat) * 100}
+            />
+            <StatCard
+              label="知识文档"
+              value={stats?.docs_count ?? '...'}
+              icon={<FileText className="w-4 h-4 text-blue-500" />}
+              color="bg-blue-500"
+              barPercent={((stats?.docs_count ?? 0) / maxStat) * 100}
+            />
+            <StatCard
+              label="工作区文件"
+              value={stats?.workspace_files ?? '...'}
+              icon={<FolderOpen className="w-4 h-4 text-amber-500" />}
+              color="bg-amber-500"
+              barPercent={((stats?.workspace_files ?? 0) / maxStat) * 100}
+            />
           </div>
         </div>
 
-        <div className="grid grid-cols-1 gap-3 mb-4">
-          <div className="bg-surface border border-border rounded-xl p-3">
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="text-sm font-semibold text-text">Agno 工具矩阵</h3>
-              <Zap className="w-3.5 h-3.5 text-warning" />
-            </div>
-            <div className="space-y-2">
-              {agents.filter(a => a.builtin_tools.length > 0).map(agent => (
-                <div key={agent.id} className="flex items-center gap-3">
-                  <span className="text-base">{agent.avatar}</span>
-                  <span className="text-xs font-medium text-text w-28 shrink-0">{agent.name}</span>
-                  <div className="flex flex-wrap gap-1">
-                    {agent.builtin_tools.map(t => (
-                      <span key={t} className="text-[10px] bg-primary-light text-primary-dark px-1.5 py-0.5 rounded">
-                        {t}
+        {/* Agent Panorama */}
+        <div>
+          <h2 className="text-sm font-semibold text-text mb-3 flex items-center gap-1.5">
+            <Bot className="w-4 h-4 text-primary" /> Agent 全景
+          </h2>
+          <div className="grid grid-cols-2 xl:grid-cols-3 gap-3">
+            {agents.map((agent) => {
+              const mountedSkills = skillCountByAgent(agent.id);
+              return (
+                <div
+                  key={agent.id}
+                  className="bg-surface border border-border rounded-xl p-3.5 hover:border-primary/30 hover:shadow-sm transition-all group"
+                >
+                  <div className="flex items-start justify-between mb-2.5">
+                    <div className="flex items-center gap-2.5">
+                      <span className="text-2xl">{agent.avatar}</span>
+                      <div>
+                        <div className="text-sm font-semibold text-text">{agent.name}</div>
+                        <div className="text-[10px] text-text-muted mt-0.5 line-clamp-1">{agent.description}</div>
+                      </div>
+                    </div>
+                    <span className="w-2 h-2 rounded-full bg-emerald-400 mt-1.5 shrink-0" title="就绪" />
+                  </div>
+
+                  {/* Capabilities */}
+                  <div className="flex flex-wrap gap-1 mb-2">
+                    {agent.capabilities.map((cap) => (
+                      <span key={cap} className="text-[10px] bg-primary/8 text-primary-dark px-1.5 py-0.5 rounded-md">
+                        {cap}
                       </span>
                     ))}
                   </div>
-                </div>
-              ))}
-            </div>
-          </div>
 
-          <div className="bg-surface border border-border rounded-xl p-3">
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="text-sm font-semibold text-text">系统能力覆盖</h3>
-              <Activity className="w-3.5 h-3.5 text-success" />
-            </div>
-            <div className="space-y-2">
-              {[
-                { label: 'Agno 内置工具', done: true, detail: 'Pandas, DuckDB, Python, File, Calculator' },
-                { label: 'Knowledge RAG', done: true, detail: 'LanceDb + FastEmbed + RecursiveChunking' },
-                { label: 'Team 多 Agent 协作', done: true, detail: 'Coordinate 模式' },
-                { label: '自定义 Skill 创建', done: true, detail: 'AI 生成 + 动态加载' },
-                { label: 'PPT 自动生成', done: true, detail: 'python-pptx' },
-                { label: 'Guardrails 安全护栏', done: false, detail: '计划中' },
-                { label: 'Workflow 工作流', done: false, detail: '计划中' },
-              ].map(item => (
-                <div key={item.label} className="flex items-center gap-2 text-xs">
-                  <span className={`w-1.5 h-1.5 rounded-full ${item.done ? 'bg-success' : 'bg-border'}`} />
-                  <span className={`font-medium ${item.done ? 'text-text' : 'text-text-muted'}`}>{item.label}</span>
-                  <span className="text-text-muted">— {item.detail}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
+                  {/* Tools & Skills bar */}
+                  <div className="flex items-center gap-2 text-[10px]">
+                    {agent.builtin_tools.length > 0 && (
+                      <div className="flex items-center gap-1 bg-amber-50 text-amber-700 px-1.5 py-0.5 rounded">
+                        <Wrench className="w-2.5 h-2.5" />
+                        {agent.builtin_tools.length} 内置工具
+                      </div>
+                    )}
+                    {mountedSkills > 0 && (
+                      <div className="flex items-center gap-1 bg-emerald-50 text-emerald-700 px-1.5 py-0.5 rounded">
+                        <Layers className="w-2.5 h-2.5" />
+                        {mountedSkills} 技能
+                      </div>
+                    )}
+                    {agent.has_knowledge && (
+                      <div className="flex items-center gap-1 bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded">
+                        <FileText className="w-2.5 h-2.5" />
+                        知识库
+                      </div>
+                    )}
+                  </div>
 
-        <div className="bg-surface border border-border rounded-xl overflow-hidden">
-          <div className="px-3 py-2.5 border-b border-border-light flex items-center justify-between">
-            <h3 className="text-sm font-semibold text-text">Agent 概览</h3>
-            <BarChart3 className="w-3.5 h-3.5 text-text-muted" />
+                  {/* Builtin tools detail */}
+                  {agent.builtin_tools.length > 0 && (
+                    <div className="mt-2 pt-2 border-t border-border-light">
+                      <div className="flex flex-wrap gap-1">
+                        {agent.builtin_tools.map((t) => (
+                          <span key={t} className="text-[9px] bg-bg text-text-muted px-1.5 py-0.5 rounded font-mono">
+                            {t}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
-          <table className="w-full text-xs">
-            <thead>
-              <tr className="bg-bg text-text-secondary">
-                <th className="text-left px-3 py-2 font-medium">Agent</th>
-                <th className="text-left px-3 py-2 font-medium">能力</th>
-                <th className="text-left px-3 py-2 font-medium">内置工具</th>
-                <th className="text-left px-3 py-2 font-medium">状态</th>
-              </tr>
-            </thead>
-            <tbody>
-              {agents.map((a) => (
-                <tr key={a.id} className="border-t border-border-light hover:bg-bg transition-colors">
-                  <td className="px-3 py-2 font-medium text-text">
-                    <span className="mr-1.5">{a.avatar}</span>{a.name}
-                  </td>
-                  <td className="px-3 py-2 text-text-secondary">{a.capabilities.slice(0, 3).join(', ')}</td>
-                  <td className="px-3 py-2 text-text-secondary">{a.builtin_tools.length > 0 ? a.builtin_tools.join(', ') : '-'}</td>
-                  <td className="px-3 py-2">
-                    <span className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-full bg-success/10 text-success">
-                      <span className="w-1 h-1 rounded-full bg-success" />就绪
-                    </span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
         </div>
       </div>
     </div>

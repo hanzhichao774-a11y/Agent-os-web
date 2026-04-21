@@ -109,6 +109,16 @@ def create_model():
             role_map={"system": "system", "user": "user", "assistant": "assistant", "tool": "tool", "model": "assistant"},
             timeout=120,
         )
+    elif provider == "kimi":
+        from agno.models.openai import OpenAIChat
+        return OpenAIChat(
+            id=model_id or "kimi-k2.6",
+            api_key=os.getenv("KIMI_API_KEY"),
+            base_url="https://api.moonshot.cn/v1",
+            role_map={"system": "system", "user": "user", "assistant": "assistant", "tool": "tool", "model": "assistant"},
+            extra_body={"thinking": {"type": "disabled"}},
+            timeout=120,
+        )
     elif provider == "anthropic":
         from agno.models.anthropic import Claude
         return Claude(id=model_id or "claude-3-5-sonnet-20241022")
@@ -174,15 +184,18 @@ scan_skills()
 
 _embedder = FastEmbedEmbedder(id="BAAI/bge-small-zh-v1.5", dimensions=512)
 
+from agno.vectordb.search import SearchType
+
 _vector_db = LanceDb(
     uri=str(BASE_DIR / "data" / "lancedb"),
     table_name="knowledge",
     embedder=_embedder,
+    search_type=SearchType.hybrid,
 )
 
 _knowledge = Knowledge(
     vector_db=_vector_db,
-    max_results=5,
+    max_results=10,
 )
 
 print("[KNOWLEDGE] Agno Knowledge + LanceDb + FastEmbed 初始化完成")
@@ -193,8 +206,8 @@ def ingest_document(doc_name: str, text: str) -> int:
     from agno.knowledge.reader.text_reader import TextReader
     reader = TextReader(
         chunk=True,
-        chunk_size=500,
-        chunking_strategy=RecursiveChunking(chunk_size=500, overlap=50),
+        chunk_size=1500,
+        chunking_strategy=RecursiveChunking(chunk_size=1500, overlap=200),
     )
     _knowledge.insert(
         name=doc_name,
@@ -204,7 +217,7 @@ def ingest_document(doc_name: str, text: str) -> int:
     )
     from agno.knowledge.document.base import Document
     doc = Document(content=text, name=doc_name)
-    chunks = RecursiveChunking(chunk_size=500, overlap=50).chunk(doc)
+    chunks = RecursiveChunking(chunk_size=1500, overlap=200).chunk(doc)
     return len(chunks)
 
 
@@ -223,6 +236,20 @@ def search_knowledge(query: str, top_k: int = 5) -> list[dict]:
 
 
 _uploaded_docs: dict[str, int] = {}
+
+
+def _restore_uploaded_docs():
+    """启动时扫描 KNOWLEDGE_DOCS_DIR，恢复文档名列表到内存。"""
+    if not KNOWLEDGE_DOCS_DIR.exists():
+        return
+    for f in KNOWLEDGE_DOCS_DIR.iterdir():
+        if f.is_file() and not f.name.startswith("."):
+            _uploaded_docs.setdefault(f.name, -1)
+    if _uploaded_docs:
+        print(f"[KNOWLEDGE] 从磁盘恢复了 {len(_uploaded_docs)} 个文档记录: {', '.join(_uploaded_docs.keys())}")
+
+
+_restore_uploaded_docs()
 
 
 def list_documents() -> list[dict]:
@@ -541,7 +568,8 @@ def get_agent(agent_id: str) -> Agent | None:
         if config.get("has_knowledge"):
             kwargs["knowledge"] = _knowledge
             kwargs["add_knowledge_to_context"] = True
-            kwargs["search_knowledge"] = False
+            kwargs["search_knowledge"] = True
+            kwargs["enable_agentic_knowledge_filters"] = True
 
         _guardrail = PromptInjectionGuardrail()
 
@@ -582,6 +610,54 @@ _teams: dict[str, Team] = {}
 
 TEAM_MEMBER_IDS = ["a1", "a2", "a3", "a4", "a5", "a6", "a7"]
 
+_INTENT_CATEGORIES: dict[str, dict] = {
+    "knowledge":     {"target": "a2", "name": "知识检索Agent", "desc": "从知识库检索已有文档内容"},
+    "data_analysis": {"target": "a1", "name": "数据分析Agent", "desc": "对 CSV/结构化数据做统计分析"},
+    "code":          {"target": "a3", "name": "代码助手Agent", "desc": "代码生成、执行与调试"},
+    "contract":      {"target": "a4", "name": "合同审查Agent", "desc": "法律合同条款风险识别"},
+    "sentiment":     {"target": "a5", "name": "舆情监控Agent", "desc": "品牌舆情分析"},
+    "data_govern":   {"target": "a6", "name": "私有数据治理Agent", "desc": "数据质量与 ETL 管理"},
+    "ppt":           {"target": "a7", "name": "PPT制作Agent",  "desc": "生成演示文稿"},
+    "multi_step":    {"target": None, "name": None, "desc": "需要多个 Agent 协作"},
+}
+
+
+async def classify_intent(message: str, docs: list[dict]) -> str:
+    """用一次轻量 LLM 调用对用户问题做意图分类，返回类别标签。"""
+    doc_list = ", ".join(d["doc_name"] for d in docs) if docs else "（无文档）"
+
+    prompt = (
+        "你是意图分类器。根据用户问题和已有知识库文档列表，判断该问题最适合由哪个类别处理。\n"
+        "只返回一个分类标签（英文小写），不要解释。\n\n"
+        f"已有知识库文档：{doc_list}\n"
+        f"用户问题：{message}\n\n"
+        "分类标签：\n"
+        "- knowledge: 与已有文档/报告/简报/报表内容相关的问答检索（只要问题可能涉及已有文档就选此项）\n"
+        "- data_analysis: 明确要求对 CSV/数据库做统计分析、建模、可视化\n"
+        "- code: 代码生成、调试、审查\n"
+        "- contract: 合同/法律条款审查\n"
+        "- sentiment: 品牌舆情分析\n"
+        "- data_govern: 数据质量/ETL 治理\n"
+        "- ppt: 生成演示文稿/PPT\n"
+        "- multi_step: 需要多个Agent协作的复杂任务（如先检索再分析再生成）\n"
+    )
+
+    try:
+        classifier = Agent(
+            model=create_model(),
+            instructions=["只返回一个英文分类标签，不要输出任何其他内容。"],
+            markdown=False,
+        )
+        response = await classifier.arun(prompt)
+        label = (response.content or "").strip().lower().replace('"', "").replace("'", "")
+        for key in _INTENT_CATEGORIES:
+            if key in label:
+                return key
+        return "knowledge"
+    except Exception as e:
+        print(f"[WARN] 意图分类失败，fallback 到 knowledge: {e}")
+        return "knowledge"
+
 
 def get_team(project_id: str) -> Team:
     if project_id in _teams:
@@ -591,27 +667,40 @@ def get_team(project_id: str) -> Team:
     members = [m for m in members if m is not None]
 
     team = Team(
-        name=f"项目团队",
-        mode=TeamMode.coordinate,
+        name="项目团队",
+        mode=TeamMode.route,
         model=create_model(),
         members=members,
+        determine_input_for_members=False,
         instructions=[
-            "你是项目协调者（Team Leader），负责理解用户需求并将任务分配给最合适的专家 Agent。",
-            "你的团队成员包括：",
-            "- 数据分析Agent：擅长 SQL、Pandas、DuckDB 数据分析",
-            "- 知识检索Agent：负责企业知识库检索和文档问答",
-            "- 代码助手Agent：擅长代码生成、执行和调试",
-            "- 合同审查Agent：法律合同风险识别",
-            "- 舆情监控Agent：品牌舆情分析",
-            "- 私有数据治理Agent：数据质量管理",
-            "- PPT制作Agent：自动生成 PPT 演示文稿",
+            "你是智能路由器，根据用户问题选择最合适的专家 Agent 来处理。",
             "",
-            "分配任务时请说明选择该成员的理由。",
-            "汇总成员响应时，提供清晰的结论和下一步建议。",
-            "始终使用中文回答。",
+            "## 核心路由原则",
+            "当用户问的是文档、简报、报告中已有的内容（如排名、统计数据、分析结论等），必须选择知识检索Agent（a2），而不是数据分析Agent。",
+            "只有当用户明确要求对 CSV 文件或数据库进行 SQL 查询、建模、可视化时，才选择数据分析Agent（a1）。",
+            "",
+            "## 成员能力",
+            "- a2 知识检索Agent：从已上传的文档/报告/简报中检索信息，包括其中的排名、数据、分析结论等",
+            "- a1 数据分析Agent：对 CSV/数据库执行 SQL 查询、Pandas 数据处理、统计建模",
+            "- a3 代码助手Agent：代码生成、执行与调试",
+            "- a4 合同审查Agent：法律合同条款风险识别",
+            "- a5 舆情监控Agent：品牌舆情分析",
+            "- a6 私有数据治理Agent：数据质量管理与 ETL",
+            "- a7 PPT制作Agent：自动生成演示文稿",
+            "",
+            "## 路由规则",
+            "- 涉及文档/报告/简报中的内容（排名、分析、数据、结论等）-> 知识检索Agent (a2)",
+            "- 明确要求对 CSV/数据库做 SQL 查询、建模、可视化 -> 数据分析Agent (a1)",
+            "- 代码生成/调试/审查 -> 代码助手Agent (a3)",
+            "- 合同/法律相关 -> 合同审查Agent (a4)",
+            "- 舆情/品牌相关 -> 舆情监控Agent (a5)",
+            "- 数据治理/ETL -> 私有数据治理Agent (a6)",
+            "- 制作PPT/演示文稿 -> PPT制作Agent (a7)",
+            "- 通用技术方案/架构设计等 -> 代码助手Agent (a3)",
+            "- 不确定时优先选择知识检索Agent (a2)",
         ],
+        show_members_responses=True,
         markdown=True,
-        share_member_interactions=True,
     )
     _teams[project_id] = team
     return team
@@ -790,25 +879,16 @@ async def team_chat(project_id: str, request: ChatRequest):
     team = get_team(project_id)
     streamed_members: set[str] = set()
 
-    docs = list_documents()
-    if docs:
-        doc_names = ", ".join(d["doc_name"] for d in docs)
-        context_msg = (
-            f"[知识库状态] 当前知识库已有以下文档：{doc_names}。"
-            f"如果用户的问题可能与这些文档内容相关，请务必将任务分配给知识检索Agent（a2）。\n\n"
-            f"用户问题：{request.message}"
-        )
-    else:
-        context_msg = request.message
-
     def _sse(payload: dict) -> str:
         return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
     async def generate():
+        routed_agent_name: str | None = None
+
         try:
             async with asyncio.timeout(300):
                 async for event in team.arun(
-                    context_msg,
+                    request.message,
                     stream=True,
                     stream_events=True,
                     session_id=f"team_{project_id}_{request.session_id}",
@@ -837,62 +917,48 @@ async def team_chat(project_id: str, request: ChatRequest):
 
                     ev_type = getattr(event, "event", "")
 
-                    # ── Team 级事件：Leader 分配任务 ──
                     if ev_type == TeamRunEvent.tool_call_started.value:
                         tool = getattr(event, "tool", None)
-                        if tool and tool.tool_name and "delegate_task" in tool.tool_name:
+                        if tool and tool.tool_name and ("delegate_task" in tool.tool_name or "route_to" in tool.tool_name):
                             args = tool.tool_args or {}
                             mid = args.get("member_id", "")
-                            task_raw = args.get("task", "")
+                            task_raw = args.get("task", args.get("input", ""))
                             avatar, display_name = _resolve_agent_display(mid)
-                            task_clean = task_raw.replace("\\n", " ").strip()
+                            routed_agent_name = f"{avatar} {display_name}"
+                            streamed_members.add(mid)
+                            task_clean = (task_raw or "").replace("\\n", " ").strip()
                             if len(task_clean) > 80:
                                 task_clean = task_clean[:80] + "..."
                             yield _sse({
                                 "type": "member_delegated",
-                                "agent_name": f"{avatar} {display_name}",
-                                "task": task_clean,
+                                "agent_name": routed_agent_name,
+                                "task": task_clean or request.message,
                                 "done": False,
                             })
 
-                    # ── Team 级事件：成员完成（如果已流式过则跳过）──
                     elif ev_type == TeamRunEvent.tool_call_completed.value:
-                        tool = getattr(event, "tool", None)
-                        if tool and tool.tool_name and "delegate_task" in tool.tool_name:
-                            args = tool.tool_args or {}
-                            mid = args.get("member_id", "")
-                            if mid in streamed_members:
-                                continue
-                            avatar, display_name = _resolve_agent_display(mid)
-                            result_text = ""
-                            if tool.result:
-                                result_text = tool.result if isinstance(tool.result, str) else str(tool.result)
-                            content = getattr(event, "content", None)
-                            if not result_text and content:
-                                result_text = content if isinstance(content, str) else str(content)
-                            result_text = _clean_content(result_text)
-                            if result_text:
-                                yield _sse({
-                                    "type": "member_response",
-                                    "agent_name": f"{avatar} {display_name}",
-                                    "content": result_text,
-                                    "done": False,
-                                })
+                        pass
 
-                    # ── Team 级事件：Leader 自身流式输出 ──
                     elif ev_type == TeamRunEvent.run_content.value:
                         content = getattr(event, "content", None)
                         if content:
                             text = content if isinstance(content, str) else str(content)
                             text = _clean_delta(text)
                             if text:
-                                yield _sse({
-                                    "type": "leader_content",
-                                    "content": text,
-                                    "done": False,
-                                })
+                                if routed_agent_name:
+                                    yield _sse({
+                                        "type": "member_streaming",
+                                        "agent_name": routed_agent_name,
+                                        "content": text,
+                                        "done": False,
+                                    })
+                                else:
+                                    yield _sse({
+                                        "type": "leader_content",
+                                        "content": text,
+                                        "done": False,
+                                    })
 
-                    # ── Agent 级事件：成员 Agent 流式输出 ──
                     elif ev_type == RunEvent.run_content.value:
                         agent_id = getattr(event, "agent_id", "")
                         content = getattr(event, "content", None)
@@ -909,7 +975,6 @@ async def team_chat(project_id: str, request: ChatRequest):
                                     "done": False,
                                 })
 
-                    # ── Agent 级事件：成员开始执行 ──
                     elif ev_type == RunEvent.run_started.value:
                         agent_id = getattr(event, "agent_id", "")
                         if agent_id:
@@ -1308,9 +1373,18 @@ async def api_upload_document(file: UploadFile = File(...)):
         import fitz
         doc_path.write_bytes(content)
         pdf = fitz.open(stream=content, filetype="pdf")
-        pages = [page.get_text().strip() for page in pdf if page.get_text().strip()]
+        _end_puncts = set('。；！？.;!?\n')
+        parts: list[str] = []
+        for page in pdf:
+            t = page.get_text().strip()
+            if not t:
+                continue
+            if parts and parts[-1] and parts[-1][-1] not in _end_puncts:
+                parts.append(' ' + t)
+            else:
+                parts.append('\n\n' + t if parts else t)
         pdf.close()
-        text = "\n\n".join(pages)
+        text = ''.join(parts).strip()
     else:
         text = content.decode("utf-8", errors="ignore")
         doc_path.write_text(text, encoding="utf-8")

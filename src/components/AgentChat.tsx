@@ -1,9 +1,9 @@
 import { useState, useRef, useEffect, useMemo } from 'react';
-import { Send, Paperclip, X, Settings, Loader2 } from 'lucide-react';
+import { Send, Paperclip, X, Settings, Loader2, Wrench, Plus } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { streamAgentChat, uploadDocument, fetchAgents } from '../services/api';
-import type { AgentInfo } from '../services/api';
+import { streamAgentChat, uploadDocument, fetchAgents, fetchSkills, setAgentTools } from '../services/api';
+import type { AgentInfo, SkillInfo } from '../services/api';
 
 interface AgentChatProps {
   agentId: string;
@@ -180,20 +180,8 @@ export default function AgentChat({ agentId, onClose }: AgentChatProps) {
         </div>
       </div>
 
-      {showConfig && (
-        <div className="bg-surface border-b border-border p-3 shrink-0">
-          <h4 className="text-xs font-semibold text-text mb-2">Agent 信息</h4>
-          <div className="space-y-1.5 text-xs">
-            <div className="flex justify-between"><span className="text-text-secondary">ID</span><span className="text-text font-mono">{agent.id}</span></div>
-            <div className="flex justify-between"><span className="text-text-secondary">内置工具</span><span className="text-text">{agent.builtin_tools.join(', ') || '无'}</span></div>
-            <div className="flex justify-between"><span className="text-text-secondary">知识库</span><span className="text-text">{agent.has_knowledge ? '已启用' : '未启用'}</span></div>
-            <div className="flex flex-wrap gap-1 mt-1">
-              {agent.capabilities.map(c => (
-                <span key={c} className="text-[10px] bg-bg text-text-secondary px-1.5 py-0.5 rounded border border-border-light">{c}</span>
-              ))}
-            </div>
-          </div>
-        </div>
+      {showConfig && agent && (
+        <AgentConfigPanel agent={agent} onSkillsChanged={(newAgent) => setAgent(newAgent)} />
       )}
 
       <div className="flex-1 overflow-y-auto p-3 space-y-3">
@@ -252,6 +240,96 @@ export default function AgentChat({ agentId, onClose }: AgentChatProps) {
             {isLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Send className="w-3 h-3" />}
           </button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+
+function AgentConfigPanel({ agent, onSkillsChanged }: { agent: AgentInfo; onSkillsChanged: (a: AgentInfo) => void }) {
+  const [allSkills, setAllSkills] = useState<SkillInfo[]>([]);
+  const [mounted, setMounted] = useState<string[]>([...agent.custom_tools]);
+  const [showPicker, setShowPicker] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    fetchSkills().then(setAllSkills);
+  }, []);
+
+  const handleToggle = async (skillId: string) => {
+    const next = mounted.includes(skillId) ? mounted.filter(s => s !== skillId) : [...mounted, skillId];
+    setMounted(next);
+    setSaving(true);
+    await setAgentTools(agent.id, next);
+    onSkillsChanged({ ...agent, custom_tools: next });
+    setSaving(false);
+  };
+
+  return (
+    <div className="bg-surface border-b border-border p-3 shrink-0 space-y-3 animate-fade-in">
+      <div>
+        <h4 className="text-xs font-semibold text-text mb-1.5">Agent 信息</h4>
+        <div className="space-y-1 text-xs">
+          <div className="flex justify-between"><span className="text-text-secondary">ID</span><span className="text-text font-mono">{agent.id}</span></div>
+          <div className="flex justify-between"><span className="text-text-secondary">内置工具</span><span className="text-text">{agent.builtin_tools.join(', ') || '无'}</span></div>
+          <div className="flex justify-between"><span className="text-text-secondary">知识库</span><span className="text-text">{agent.has_knowledge ? '已启用' : '未启用'}</span></div>
+          <div className="flex flex-wrap gap-1 mt-1">
+            {agent.capabilities.map(c => (
+              <span key={c} className="text-[10px] bg-bg text-text-secondary px-1.5 py-0.5 rounded border border-border-light">{c}</span>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <div className="flex items-center justify-between mb-1.5">
+          <h4 className="text-xs font-semibold text-text flex items-center gap-1">
+            <Wrench className="w-3 h-3" /> 自定义技能 ({mounted.length})
+            {saving && <Loader2 className="w-3 h-3 animate-spin text-primary ml-1" />}
+          </h4>
+          <button
+            onClick={() => setShowPicker(!showPicker)}
+            className="text-[10px] text-primary-dark hover:underline flex items-center gap-0.5"
+          >
+            <Plus className="w-3 h-3" />{showPicker ? '收起' : '挂载技能'}
+          </button>
+        </div>
+
+        {mounted.length > 0 && (
+          <div className="space-y-1 mb-2">
+            {mounted.map(sid => {
+              const skill = allSkills.find(s => s.id === sid);
+              return (
+                <div key={sid} className="flex items-center justify-between bg-bg rounded-md px-2 py-1 text-xs">
+                  <span className="text-text">{skill?.icon || '🔧'} {skill?.name || sid}</span>
+                  <button onClick={() => handleToggle(sid)} className="text-text-muted hover:text-error text-[10px]">卸载</button>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {showPicker && (
+          <div className="space-y-1 max-h-32 overflow-y-auto">
+            {allSkills.filter(s => !mounted.includes(s.id)).map(skill => (
+              <div
+                key={skill.id}
+                onClick={() => handleToggle(skill.id)}
+                className="flex items-center justify-between bg-bg hover:bg-primary-light/30 rounded-md px-2 py-1 text-xs cursor-pointer transition-colors"
+              >
+                <span className="text-text">{skill.icon} {skill.name}</span>
+                <span className="text-[10px] text-primary-dark">+ 挂载</span>
+              </div>
+            ))}
+            {allSkills.filter(s => !mounted.includes(s.id)).length === 0 && (
+              <div className="text-[10px] text-text-muted text-center py-2">无更多可挂载技能</div>
+            )}
+          </div>
+        )}
+
+        {mounted.length === 0 && !showPicker && (
+          <div className="text-[10px] text-text-muted">暂无自定义技能，点击"挂载技能"添加</div>
+        )}
       </div>
     </div>
   );

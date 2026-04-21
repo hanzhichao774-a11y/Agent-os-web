@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
-import { Plus, Play, Pause, MessageSquare, Settings, Loader2, X } from 'lucide-react';
-import { fetchSkills, createSkill } from '../services/api';
-import type { SkillInfo } from '../services/api';
+import { Plus, MessageSquare, Settings, Loader2, X, Trash2, Link } from 'lucide-react';
+import { fetchSkills, createSkill, deleteSkill, fetchAgents, setAgentTools } from '../services/api';
+import type { SkillInfo, AgentInfo } from '../services/api';
 
 interface SkillPageProps {
   selectedSkillId: string | null;
@@ -16,6 +16,14 @@ const categoryConfig: Record<string, { label: string; color: string }> = {
   api: { label: 'API', color: 'bg-text-muted/10 text-text-muted' },
 };
 
+const CATEGORY_AGENT_MAP: Record<string, string[]> = {
+  data: ['a1'],
+  analysis: ['a1'],
+  code: ['a5'],
+  search: ['a2'],
+  api: ['a4'],
+};
+
 export default function SkillPage({ selectedSkillId, onSelectSkill }: SkillPageProps) {
   const [skillList, setSkillList] = useState<SkillInfo[]>([]);
   const [loading, setLoading] = useState(true);
@@ -23,6 +31,14 @@ export default function SkillPage({ selectedSkillId, onSelectSkill }: SkillPageP
   const [createDesc, setCreateDesc] = useState('');
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState('');
+  const [detailSkill, setDetailSkill] = useState<SkillInfo | null>(null);
+  const [agents, setAgents] = useState<AgentInfo[]>([]);
+
+  // Mount suggest state
+  const [mountSuggest, setMountSuggest] = useState<{ skillId: string; skillName: string; category: string } | null>(null);
+  const [suggestAgents, setSuggestAgents] = useState<AgentInfo[]>([]);
+  const [suggestSelected, setSuggestSelected] = useState<string[]>([]);
+  const [mounting, setMounting] = useState(false);
 
   const loadSkills = async () => {
     setLoading(true);
@@ -38,14 +54,59 @@ export default function SkillPage({ selectedSkillId, onSelectSkill }: SkillPageP
     setCreating(true);
     setCreateError('');
     const result = await createSkill(createDesc);
-    if (result.success) {
+    if (result.success && result.skill_id) {
       setShowCreate(false);
       setCreateDesc('');
       await loadSkills();
+      // Trigger mount suggestion
+      const allAgents = await fetchAgents();
+      setAgents(allAgents);
+      const skills = await fetchSkills();
+      const newSkill = skills.find(s => s.id === result.skill_id);
+      if (newSkill) {
+        const cat = newSkill.category || 'api';
+        const recommended = CATEGORY_AGENT_MAP[cat] || [];
+        const recAgents = allAgents.filter(a => recommended.includes(a.id));
+        setSuggestAgents(allAgents);
+        setSuggestSelected(recAgents.map(a => a.id));
+        setMountSuggest({ skillId: newSkill.id, skillName: newSkill.name, category: cat });
+      }
     } else {
       setCreateError(result.error || '创建失败');
     }
     setCreating(false);
+  };
+
+  const handleMountConfirm = async () => {
+    if (!mountSuggest) return;
+    setMounting(true);
+    for (const agentId of suggestSelected) {
+      const agent = suggestAgents.find(a => a.id === agentId);
+      if (agent) {
+        const currentTools = [...agent.custom_tools];
+        if (!currentTools.includes(mountSuggest.skillId)) {
+          currentTools.push(mountSuggest.skillId);
+          await setAgentTools(agentId, currentTools);
+        }
+      }
+    }
+    setMounting(false);
+    setMountSuggest(null);
+    await loadSkills();
+  };
+
+  const openDetail = async (skill: SkillInfo) => {
+    setDetailSkill(skill);
+    const agentData = await fetchAgents();
+    setAgents(agentData);
+  };
+
+  const handleDelete = async (skillId: string) => {
+    if (!confirm('确认删除此技能？已挂载到 Agent 的绑定也会自动解除。')) return;
+    await deleteSkill(skillId);
+    setDetailSkill(null);
+    if (selectedSkillId === skillId) onSelectSkill(null);
+    await loadSkills();
   };
 
   return (
@@ -67,7 +128,7 @@ export default function SkillPage({ selectedSkillId, onSelectSkill }: SkillPageP
           </button>
         </div>
 
-        {/* 创建弹窗 */}
+        {/* Create Modal */}
         {showCreate && (
           <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50">
             <div className="bg-surface border border-border rounded-2xl shadow-xl w-[480px] p-6 animate-fade-in">
@@ -110,6 +171,63 @@ export default function SkillPage({ selectedSkillId, onSelectSkill }: SkillPageP
           </div>
         )}
 
+        {/* Mount Suggest Modal */}
+        {mountSuggest && (
+          <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50">
+            <div className="bg-surface border border-border rounded-2xl shadow-xl w-[480px] p-6 animate-fade-in">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-semibold text-text">挂载技能到 Agent</h3>
+                <button onClick={() => setMountSuggest(null)} className="p-1 hover:bg-bg rounded-lg">
+                  <X className="w-5 h-5 text-text-muted" />
+                </button>
+              </div>
+              <p className="text-sm text-text-secondary mb-4">
+                技能 <strong>{mountSuggest.skillName}</strong> 已创建成功！选择要挂载到的 Agent：
+              </p>
+              <div className="space-y-2 max-h-60 overflow-y-auto mb-4">
+                {suggestAgents.map(agent => {
+                  const isSelected = suggestSelected.includes(agent.id);
+                  const isRecommended = (CATEGORY_AGENT_MAP[mountSuggest.category] || []).includes(agent.id);
+                  return (
+                    <div
+                      key={agent.id}
+                      onClick={() => setSuggestSelected(prev => isSelected ? prev.filter(id => id !== agent.id) : [...prev, agent.id])}
+                      className={`flex items-center justify-between rounded-lg px-3 py-2 cursor-pointer transition-colors border ${
+                        isSelected ? 'bg-primary-light/50 border-primary/20' : 'bg-bg border-border hover:border-primary/30'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className="text-base">{agent.avatar}</span>
+                        <div>
+                          <div className="text-sm font-medium text-text">{agent.name}</div>
+                          <div className="text-xs text-text-muted">{agent.builtin_tools.length} 内置工具 · {agent.custom_tools.length} 自定义技能</div>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        {isRecommended && <span className="text-[10px] bg-warning/10 text-warning px-1.5 py-0.5 rounded-full">推荐</span>}
+                        {isSelected && <span className="text-xs text-primary-dark font-medium">已选</span>}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="flex justify-end gap-2">
+                <button onClick={() => setMountSuggest(null)} className="px-4 py-2 text-sm text-text-secondary hover:bg-bg rounded-lg transition-colors">
+                  跳过
+                </button>
+                <button
+                  onClick={handleMountConfirm}
+                  disabled={mounting || suggestSelected.length === 0}
+                  className="flex items-center gap-2 px-4 py-2 bg-primary text-white rounded-lg text-sm font-medium hover:bg-primary-dark transition-colors disabled:opacity-50"
+                >
+                  {mounting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Link className="w-4 h-4" />}
+                  {mounting ? '挂载中...' : `挂载到 ${suggestSelected.length} 个 Agent`}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Stats */}
         <div className="grid grid-cols-3 gap-4 mb-6">
           <div className="bg-surface border border-border rounded-xl p-4">
@@ -146,6 +264,7 @@ export default function SkillPage({ selectedSkillId, onSelectSkill }: SkillPageP
             {skillList.map((skill) => {
               const cat = categoryConfig[skill.category] || categoryConfig.api;
               const isSelected = selectedSkillId === skill.id;
+              const mountCount = skill.mounted_agents?.length || 0;
               return (
                 <div
                   key={skill.id}
@@ -165,6 +284,9 @@ export default function SkillPage({ selectedSkillId, onSelectSkill }: SkillPageP
                     <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${cat.color}`}>
                       {cat.label}
                     </span>
+                    {mountCount > 0 && (
+                      <span className="ml-1.5 text-[10px] text-text-muted">{mountCount} Agent</span>
+                    )}
                   </div>
                   <div className="col-span-3 flex flex-wrap gap-1">
                     {skill.params.map((p) => (
@@ -183,7 +305,11 @@ export default function SkillPage({ selectedSkillId, onSelectSkill }: SkillPageP
                       <MessageSquare className="w-3.5 h-3.5" />
                       交互
                     </button>
-                    <button onClick={(e) => e.stopPropagation()} className="p-1.5 hover:bg-bg rounded-lg transition-colors text-text-muted">
+                    <button
+                      onClick={(e) => { e.stopPropagation(); openDetail(skill); }}
+                      className="p-1.5 hover:bg-bg rounded-lg transition-colors text-text-muted"
+                      title="技能设置"
+                    >
                       <Settings className="w-3.5 h-3.5" />
                     </button>
                   </div>
@@ -193,6 +319,83 @@ export default function SkillPage({ selectedSkillId, onSelectSkill }: SkillPageP
           </div>
         )}
       </div>
+
+      {/* Skill Detail Modal */}
+      {detailSkill && (
+        <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50" onClick={() => setDetailSkill(null)}>
+          <div className="bg-surface border border-border rounded-2xl shadow-xl w-[480px] max-h-[70vh] flex flex-col animate-fade-in" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between p-5 border-b border-border shrink-0">
+              <div className="flex items-center gap-3">
+                <span className="text-2xl">{detailSkill.icon}</span>
+                <div>
+                  <h3 className="font-semibold text-text">{detailSkill.name}</h3>
+                  <span className="text-xs text-text-muted">{detailSkill.id} · {detailSkill.category}</span>
+                </div>
+              </div>
+              <button onClick={() => setDetailSkill(null)} className="p-1.5 hover:bg-bg rounded-lg transition-colors text-text-muted">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-5 space-y-4 min-h-0">
+              <div>
+                <label className="text-xs font-semibold text-text-secondary block mb-1">描述</label>
+                <p className="text-sm text-text">{detailSkill.description}</p>
+              </div>
+
+              <div>
+                <label className="text-xs font-semibold text-text-secondary block mb-1.5">参数</label>
+                {detailSkill.params.length > 0 ? (
+                  <div className="space-y-1.5">
+                    {detailSkill.params.map(p => (
+                      <div key={p.name} className="flex items-center justify-between bg-bg rounded-lg px-3 py-2 text-xs border border-border">
+                        <span className="text-text font-medium">{p.name}</span>
+                        <div className="flex items-center gap-2">
+                          <span className="text-text-muted">{p.type}</span>
+                          {p.default && <span className="text-text-muted">默认: {p.default}</span>}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-xs text-text-muted">无参数</p>
+                )}
+              </div>
+
+              <div>
+                <label className="text-xs font-semibold text-text-secondary block mb-1.5">已挂载 Agent</label>
+                {(detailSkill.mounted_agents && detailSkill.mounted_agents.length > 0) ? (
+                  <div className="flex flex-wrap gap-2">
+                    {detailSkill.mounted_agents.map(a => {
+                      const agent = agents.find(ag => ag.id === a.id);
+                      return (
+                        <span key={a.id} className="text-xs bg-primary-light text-primary-dark px-2 py-1 rounded-lg flex items-center gap-1">
+                          {agent?.avatar || '🤖'} {a.name}
+                        </span>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <p className="text-xs text-text-muted">未挂载到任何 Agent</p>
+                )}
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between p-5 border-t border-border shrink-0">
+              <button
+                onClick={() => handleDelete(detailSkill.id)}
+                className="flex items-center gap-1.5 px-3 py-2 text-sm text-error hover:bg-error/10 rounded-lg transition-colors"
+              >
+                <Trash2 className="w-4 h-4" />
+                删除技能
+              </button>
+              <button onClick={() => setDetailSkill(null)} className="px-4 py-2 text-sm text-text-secondary hover:bg-bg rounded-lg transition-colors">
+                关闭
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

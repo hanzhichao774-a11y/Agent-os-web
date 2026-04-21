@@ -13,6 +13,7 @@ export interface SkillInfo {
   category: string;
   description: string;
   params: Array<{ name: string; type: string; default?: string | null }>;
+  mounted_agents?: Array<{ id: string; name: string }>;
 }
 
 export interface AgentInfo {
@@ -24,6 +25,7 @@ export interface AgentInfo {
   builtin_tools: string[];
   custom_tools: string[];
   has_knowledge: boolean;
+  instructions?: string[];
 }
 
 export interface StatsData {
@@ -219,6 +221,35 @@ export async function runSkill(skillId: string, params: Record<string, string | 
   return res.json();
 }
 
+/** 删除技能 */
+export async function deleteSkill(skillId: string): Promise<{ success: boolean; error?: string }> {
+  const res = await fetch(`${API_BASE}/api/skills/${skillId}`, { method: 'DELETE' });
+  return res.json();
+}
+
+/** 设置 Agent 挂载的技能列表 */
+export async function setAgentTools(agentId: string, skillIds: string[]): Promise<{ success: boolean; error?: string }> {
+  const res = await fetch(`${API_BASE}/api/agents/${agentId}/tools`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ skill_ids: skillIds }),
+  });
+  return res.json();
+}
+
+/** 更新 Agent 配置（描述、指令） */
+export async function updateAgentConfig(
+  agentId: string,
+  config: { description?: string; instructions?: string[] },
+): Promise<{ success: boolean; error?: string }> {
+  const res = await fetch(`${API_BASE}/api/agents/${agentId}/config`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(config),
+  });
+  return res.json();
+}
+
 /** 上传文档到知识库 */
 export async function uploadDocument(file: File): Promise<{ success: boolean; doc_name?: string; chunks?: number; error?: string }> {
   const formData = new FormData();
@@ -277,6 +308,46 @@ export async function runWorkflow(
 
   if (!response.ok) {
     throw new Error(`工作流执行失败: ${response.status}`);
+  }
+
+  const reader = response.body!.getReader();
+  const decoder = new TextDecoder();
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    const text = decoder.decode(value, { stream: true });
+    for (const line of text.split('\n')) {
+      if (line.startsWith('data: ')) {
+        try {
+          const data: ChatChunk = JSON.parse(line.slice(6));
+          onChunk(data);
+        } catch {
+          // skip
+        }
+      }
+    }
+  }
+}
+
+/**
+ * 技能对话式管理：向技能管理 Agent 发消息，SSE 流式接收响应。
+ */
+export async function streamSkillChat(
+  skillId: string,
+  message: string,
+  sessionId: string,
+  onChunk: (chunk: ChatChunk) => void,
+): Promise<void> {
+  const response = await fetch(`${API_BASE}/api/skills/${skillId}/chat`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ message, session_id: sessionId }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`后端响应异常: ${response.status} ${response.statusText}`);
   }
 
   const reader = response.body!.getReader();

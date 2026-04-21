@@ -1,13 +1,16 @@
 import { useState } from 'react';
 import {
   Bot, Shield, Network, CheckCircle2, Circle, Loader2, Terminal,
-  ArrowRight
+  ArrowRight, Clock
 } from 'lucide-react';
-import { taskFlow, activeAgents, auditLogs } from '../data/mockData';
+import type { TeamAgentStatus, TeamTaskStep } from '../App';
+import { auditLogs } from '../data/mockData';
 
 interface RightPanelProps {
   activeView: string;
   activeProjectId: string | null;
+  teamAgents: TeamAgentStatus[];
+  teamSteps: TeamTaskStep[];
 }
 
 type BottomTabKey = 'agents' | 'knowledge' | 'audit';
@@ -18,52 +21,72 @@ const bottomTabs: { key: BottomTabKey; label: string; icon: React.ElementType }[
   { key: 'audit', label: '审计日志', icon: Shield },
 ];
 
-// 横向任务流组件
-function TaskFlowHorizontal() {
+function TaskFlowHorizontal({ steps }: { steps: TeamTaskStep[] }) {
+  if (steps.length === 0) {
+    return (
+      <div className="h-full flex flex-col px-4 py-2">
+        <h3 className="text-xs font-semibold text-text-muted uppercase tracking-wider mb-2 shrink-0">任务执行流</h3>
+        <div className="flex-1 flex items-center justify-center min-h-0">
+          <div className="flex flex-col items-center gap-1.5 text-text-muted">
+            <Clock className="w-4 h-4 opacity-40" />
+            <span className="text-[10px]">等待任务开始...</span>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const completedCount = steps.filter(s => s.status === 'completed').length;
+
   return (
-    <div className="h-full flex flex-col px-4 py-3">
-      <h3 className="text-xs font-semibold text-text-muted uppercase tracking-wider mb-3 shrink-0">任务执行流</h3>
-      <div className="flex-1 flex items-center justify-center min-h-0">
-        <div className="flex items-center gap-2 w-full overflow-x-auto pb-1">
-          {taskFlow.map((step, i) => {
-            const isLast = i === taskFlow.length - 1;
+    <div className="h-full flex flex-col px-4 py-2">
+      <div className="flex items-center justify-between mb-2 shrink-0">
+        <h3 className="text-xs font-semibold text-text-muted uppercase tracking-wider">任务执行流</h3>
+        <span className="text-[10px] text-text-muted">{completedCount}/{steps.length} 完成</span>
+      </div>
+      <div className="flex-1 flex items-center min-h-0">
+        <div className="flex items-center gap-0.5 w-full overflow-x-auto pb-1">
+          {steps.map((step, i) => {
+            const isLast = i === steps.length - 1;
             return (
-              <div key={i} className="flex items-center gap-2 shrink-0">
-                {/* Step Node */}
-                <div className="flex flex-col items-center min-w-[90px]">
-                  <div className={`w-9 h-9 rounded-full flex items-center justify-center border-2 mb-1.5 ${
+              <div key={`${step.agent}-${i}`} className="flex items-center gap-0.5 shrink-0">
+                <div className="flex flex-col items-center min-w-[64px] max-w-[72px]">
+                  <div className={`w-6 h-6 rounded-full flex items-center justify-center border-[1.5px] mb-1 ${
                     step.status === 'completed'
                       ? 'bg-success/10 border-success text-success'
                       : step.status === 'in-progress'
                       ? 'bg-warning/10 border-warning text-warning'
                       : 'bg-bg border-border text-text-muted'
                   }`}>
-                    {step.status === 'completed' && <CheckCircle2 className="w-4.5 h-4.5" />}
-                    {step.status === 'in-progress' && <Loader2 className="w-4.5 h-4.5 animate-spin" />}
-                    {step.status === 'pending' && <Circle className="w-4.5 h-4.5" />}
+                    {step.status === 'completed' && <CheckCircle2 className="w-3 h-3" />}
+                    {step.status === 'in-progress' && <Loader2 className="w-3 h-3 animate-spin" />}
+                    {step.status === 'pending' && <Circle className="w-3 h-3" />}
                   </div>
-                  <span className={`text-xs font-medium text-center leading-tight ${
+                  <span className={`text-[10px] font-medium text-center leading-tight truncate w-full ${
                     step.status === 'completed' ? 'text-success' :
                     step.status === 'in-progress' ? 'text-warning' : 'text-text-muted'
-                  }`}>
+                  }`} title={step.name}>
                     {step.name}
                   </span>
-                  <span className="text-[10px] text-text-muted mt-0.5 text-center leading-tight">{step.agent}</span>
-                  {step.time !== '-' && (
-                    <span className="text-[10px] text-text-muted/60 mt-0.5">{step.time}</span>
+                  {step.status === 'completed' && step.duration && (
+                    <span className="text-[9px] text-text-muted/70 mt-0.5 flex items-center gap-0.5">
+                      <Clock className="w-2 h-2" />{step.duration}
+                    </span>
+                  )}
+                  {step.status === 'completed' && step.tokens && (
+                    <span className="text-[9px] text-text-muted/70 flex items-center gap-0.5">
+                      <Terminal className="w-2 h-2" />{step.tokens > 1000 ? `${(step.tokens / 1000).toFixed(1)}k` : step.tokens}
+                    </span>
+                  )}
+                  {step.status === 'in-progress' && (
+                    <span className="text-[9px] text-warning/70 mt-0.5">执行中...</span>
                   )}
                 </div>
 
-                {/* Arrow */}
                 {!isLast && (
-                  <div className="flex flex-col items-center px-1">
-                    <ArrowRight className={`w-4 h-4 shrink-0 ${
-                      step.status === 'completed' ? 'text-success/50' : 'text-border'
-                    }`} />
-                    <div className={`h-0.5 w-full mt-1 rounded ${
-                      step.status === 'completed' ? 'bg-success/40' : 'bg-border'
-                    }`} style={{ minWidth: '24px' }} />
-                  </div>
+                  <ArrowRight className={`w-3 h-3 shrink-0 mx-0.5 ${
+                    step.status === 'completed' ? 'text-success/40' : 'text-border'
+                  }`} />
                 )}
               </div>
             );
@@ -74,9 +97,7 @@ function TaskFlowHorizontal() {
   );
 }
 
-// 知识图谱组件
 function KnowledgeGraph() {
-  // 模拟知识图谱数据：节点和边
   const nodes = [
     { id: 'project', label: 'Q3财报分析', x: 200, y: 140, type: 'project', color: '#4f46e5' },
     { id: 'file', label: 'sales_q3.xlsx', x: 80, y: 80, type: 'file', color: '#059669' },
@@ -114,7 +135,6 @@ function KnowledgeGraph() {
       </div>
       <div className="flex-1 bg-bg rounded-xl border border-border overflow-hidden relative min-h-0">
         <svg viewBox="0 0 440 320" className="w-full h-full" preserveAspectRatio="xMidYMid meet">
-          {/* Edges */}
           {edges.map((edge, i) => {
             const from = nodeById[edge.from];
             const to = nodeById[edge.to];
@@ -132,7 +152,6 @@ function KnowledgeGraph() {
             );
           })}
 
-          {/* Nodes */}
           {nodes.map((node) => (
             <g key={node.id}>
               <circle
@@ -162,7 +181,6 @@ function KnowledgeGraph() {
           ))}
         </svg>
 
-        {/* Legend */}
         <div className="absolute bottom-2 left-2 flex flex-wrap gap-x-3 gap-y-1">
           {[
             { label: '项目', color: '#4f46e5' },
@@ -183,46 +201,53 @@ function KnowledgeGraph() {
   );
 }
 
-// Agent 状态面板
-function AgentStatusPanel() {
+function AgentStatusPanel({ agents }: { agents: TeamAgentStatus[] }) {
+  const LEADER: TeamAgentStatus = { name: '👑 Team Leader', status: 'idle', currentTask: '待命中，随时协调任务' };
+  const hasLeader = agents.some(a => a.name.includes('Leader'));
+  const displayAgents = hasLeader ? agents : [LEADER, ...agents];
+
+  const workingCount = displayAgents.filter(a => a.status === 'working').length;
+  const doneCount = displayAgents.filter(a => a.status === 'done').length;
+  const onlineCount = displayAgents.length;
+
   return (
     <div className="h-full flex flex-col px-4 py-3 space-y-3 overflow-y-auto">
-      <h3 className="text-sm font-semibold text-text shrink-0">活跃 Agent</h3>
-      {activeAgents.map((a) => (
-        <div key={a.id} className="bg-bg border border-border rounded-lg p-3">
-          <div className="flex items-center justify-between mb-1">
-            <div className="flex items-center gap-2">
-              <span className={`w-2 h-2 rounded-full ${
-                a.status === 'running' ? 'bg-warning animate-pulse-dot' :
-                a.status === 'idle' ? 'bg-success' : 'bg-text-muted'
-              }`} />
-              <span className="text-sm font-medium text-text">{a.name}</span>
-            </div>
-            <span className={`text-xs px-1.5 py-0.5 rounded ${
-              a.role === 'host' ? 'bg-agent-host/10 text-agent-host' : 'bg-agent-normal/10 text-agent-normal'
-            }`}>
-              {a.role === 'host' ? '群主' : '执行'}
-            </span>
-          </div>
-          <div className="text-xs text-text-secondary">{a.currentTask}</div>
-        </div>
-      ))}
-
-      <div className="pt-2 border-t border-border-light shrink-0">
-        <h4 className="text-xs font-semibold text-text-secondary mb-2">上下文占用</h4>
-        <div className="flex items-center gap-2">
-          <div className="flex-1 bg-border-light rounded-full h-2">
-            <div className="bg-primary h-2 rounded-full" style={{ width: '32%' }} />
-          </div>
-          <span className="text-xs text-text-muted">32%</span>
-        </div>
-        <div className="text-xs text-text-muted mt-1">12 个事件 / 200K tokens</div>
+      <div className="flex items-center justify-between shrink-0">
+        <h3 className="text-sm font-semibold text-text">活跃 Agent</h3>
+        <span className="text-[10px] text-text-muted">
+          {onlineCount} 在线{workingCount > 0 ? ` · ${workingCount} 执行中` : ''}{doneCount > 0 ? ` · ${doneCount} 已完成` : ''}
+        </span>
       </div>
+      {displayAgents.map((a, i) => {
+        const isLeader = a.name.includes('Leader');
+        return (
+          <div key={`${a.name}-${i}`} className={`border rounded-lg p-3 ${isLeader ? 'bg-amber-50/50 dark:bg-amber-900/10 border-amber-200 dark:border-amber-800/30' : 'bg-bg border-border'}`}>
+            <div className="flex items-center justify-between mb-1">
+              <div className="flex items-center gap-2">
+                <span className={`w-2 h-2 rounded-full ${
+                  a.status === 'working' ? 'bg-warning animate-pulse' :
+                  a.status === 'done' ? 'bg-success' :
+                  isLeader ? 'bg-success' : 'bg-text-muted'
+                }`} />
+                <span className="text-sm font-medium text-text">{a.name}</span>
+              </div>
+              <span className={`text-xs px-1.5 py-0.5 rounded ${
+                a.status === 'working' ? 'bg-warning/10 text-warning' :
+                a.status === 'done' ? 'bg-success/10 text-success' :
+                isLeader ? 'bg-success/10 text-success' :
+                'bg-agent-normal/10 text-agent-normal'
+              }`}>
+                {a.status === 'working' ? '执行中' : a.status === 'done' ? '已完成' : isLeader ? '在线' : '等待'}
+              </span>
+            </div>
+            <div className="text-xs text-text-secondary">{a.currentTask}</div>
+          </div>
+        );
+      })}
     </div>
   );
 }
 
-// 审计日志面板
 function AuditPanel() {
   return (
     <div className="h-full flex flex-col px-4 py-3 overflow-y-auto">
@@ -242,7 +267,7 @@ function AuditPanel() {
   );
 }
 
-export default function RightPanel({ activeView, activeProjectId }: RightPanelProps) {
+export default function RightPanel({ activeView, activeProjectId, teamAgents, teamSteps }: RightPanelProps) {
   const [bottomTab, setBottomTab] = useState<BottomTabKey>('agents');
 
   const isProjectView = activeView === 'project' && activeProjectId;
@@ -250,14 +275,11 @@ export default function RightPanel({ activeView, activeProjectId }: RightPanelPr
 
   return (
     <div className="w-full h-full flex flex-col bg-surface border-l border-border">
-      {/* 上半部分：横向任务流 */}
       <div className="h-[15%] shrink-0 border-b border-border">
-        <TaskFlowHorizontal />
+        <TaskFlowHorizontal steps={teamSteps} />
       </div>
 
-      {/* 下半部分：选项卡切换 */}
       <div className="flex-1 min-h-0 flex flex-col">
-        {/* Tab Bar */}
         <div className="flex items-center border-b border-border shrink-0">
           {bottomTabs.map((tab) => {
             const Icon = tab.icon;
@@ -278,9 +300,8 @@ export default function RightPanel({ activeView, activeProjectId }: RightPanelPr
           })}
         </div>
 
-        {/* Tab Content */}
         <div className="flex-1 min-h-0 overflow-hidden">
-          {bottomTab === 'agents' && <AgentStatusPanel />}
+          {bottomTab === 'agents' && <AgentStatusPanel agents={teamAgents} />}
           {bottomTab === 'knowledge' && <KnowledgeGraph />}
           {bottomTab === 'audit' && <AuditPanel />}
         </div>

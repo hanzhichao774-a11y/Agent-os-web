@@ -1,6 +1,8 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useMemo } from 'react';
 import { Send, Paperclip, AtSign, ArrowRight, Search, TrendingUp, CheckCircle2, BarChart3, FolderOpen, Bot, Wrench, Loader2 } from 'lucide-react';
-import { streamAgentChat } from '../services/api';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import { streamAgentChat, uploadDocument } from '../services/api';
 
 interface ChatMsg {
   id: string;
@@ -16,6 +18,55 @@ interface ChatMsg {
     meta?: string;
     action?: string;
   }>;
+}
+
+function stripThinkTags(text: string): string {
+  return text.replace(/<think>[\s\S]*?<\/think>/g, '').replace(/<\/?member[^>]*>/g, '').trim();
+}
+
+function MarkdownContent({ content }: { content: string }) {
+  const cleaned = useMemo(() => stripThinkTags(content), [content]);
+  return (
+    <ReactMarkdown
+      remarkPlugins={[remarkGfm]}
+      components={{
+        p: ({ children }) => <p className="mb-1.5 last:mb-0">{children}</p>,
+        ul: ({ children }) => <ul className="list-disc pl-4 mb-1.5">{children}</ul>,
+        ol: ({ children }) => <ol className="list-decimal pl-4 mb-1.5">{children}</ol>,
+        li: ({ children }) => <li className="mb-0.5">{children}</li>,
+        h1: ({ children }) => <h1 className="text-base font-bold mb-2">{children}</h1>,
+        h2: ({ children }) => <h2 className="text-sm font-bold mb-1.5">{children}</h2>,
+        h3: ({ children }) => <h3 className="text-sm font-semibold mb-1">{children}</h3>,
+        code: ({ children, className }) => {
+          const isBlock = className?.startsWith('language-');
+          if (isBlock) {
+            return (
+              <pre className="bg-gray-100 dark:bg-gray-800 rounded-lg p-3 overflow-x-auto text-xs mb-2">
+                <code>{children}</code>
+              </pre>
+            );
+          }
+          return <code className="bg-gray-100 dark:bg-gray-800 px-1 py-0.5 rounded text-xs">{children}</code>;
+        },
+        pre: ({ children }) => <>{children}</>,
+        table: ({ children }) => (
+          <div className="overflow-x-auto mb-2">
+            <table className="min-w-full text-xs border-collapse border border-gray-200 dark:border-gray-700">{children}</table>
+          </div>
+        ),
+        thead: ({ children }) => <thead className="bg-gray-50 dark:bg-gray-800">{children}</thead>,
+        th: ({ children }) => <th className="px-2 py-1 border border-gray-200 dark:border-gray-700 font-semibold text-left">{children}</th>,
+        td: ({ children }) => <td className="px-2 py-1 border border-gray-200 dark:border-gray-700">{children}</td>,
+        strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
+        blockquote: ({ children }) => (
+          <blockquote className="border-l-3 border-gray-300 dark:border-gray-600 pl-3 italic text-text-muted mb-2">{children}</blockquote>
+        ),
+        hr: () => <hr className="my-2 border-gray-200 dark:border-gray-700" />,
+      }}
+    >
+      {cleaned}
+    </ReactMarkdown>
+  );
 }
 
 const initialMessages: ChatMsg[] = [
@@ -100,8 +151,14 @@ export default function GlobalChat() {
   const [input, setInput] = useState('');
   const [showMention, setShowMention] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
   const sessionId = useRef(`global_${Date.now()}`);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  function now() {
+    return new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+  }
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -152,6 +209,25 @@ export default function GlobalChat() {
     }
   };
 
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = '';
+    setIsUploading(true);
+    setMessages(prev => [...prev, { id: `upload_${Date.now()}`, role: 'system', senderName: '系统', avatar: '🔔', content: `正在上传 ${file.name}...`, timestamp: now() }]);
+    try {
+      const result = await uploadDocument(file);
+      const msg = result.success
+        ? `已上传 ${result.doc_name}，共 ${result.chunks} 个段落已入库。知识检索 Agent 可检索此文档。`
+        : `上传失败：${result.error || '未知错误'}`;
+      setMessages(prev => [...prev, { id: `upload_done_${Date.now()}`, role: 'system', senderName: '系统', avatar: '🔔', content: msg, timestamp: now() }]);
+    } catch {
+      setMessages(prev => [...prev, { id: `upload_err_${Date.now()}`, role: 'system', senderName: '系统', avatar: '🔔', content: '上传失败，请确认后端服务已启动。', timestamp: now() }]);
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
   return (
     <div className="h-full flex flex-col bg-bg">
       {/* Chat Header */}
@@ -193,7 +269,13 @@ export default function GlobalChat() {
                 msg.role === 'human' ? 'bg-primary-light border-primary/20' :
                 'bg-bg border-border'
               }`}>
-                <div className="text-text whitespace-pre-wrap">{renderMentions(msg.content)}</div>
+                <div className="text-text prose prose-sm max-w-none dark:prose-invert">
+                  {msg.role === 'human' ? (
+                    <div className="whitespace-pre-wrap">{renderMentions(msg.content)}</div>
+                  ) : (
+                    <MarkdownContent content={msg.content} />
+                  )}
+                </div>
 
                 {/* Cards */}
                 {msg.cards && (
@@ -232,9 +314,15 @@ export default function GlobalChat() {
       <div className="bg-surface border-t border-border p-3 shrink-0">
         <div className="relative">
           <div className="flex items-end gap-2 bg-bg border border-border rounded-xl px-3 py-2 focus-within:border-primary transition-colors">
-            <button className="p-1.5 hover:bg-border-light rounded-lg transition-colors shrink-0">
-              <Paperclip className="w-4.5 h-4.5 text-text-muted" />
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              disabled={isUploading}
+              className="p-1.5 hover:bg-border-light rounded-lg transition-colors shrink-0"
+              title="上传文档到知识库"
+            >
+              {isUploading ? <Loader2 className="w-4.5 h-4.5 text-text-muted animate-spin" /> : <Paperclip className="w-4.5 h-4.5 text-text-muted" />}
             </button>
+            <input ref={fileInputRef} type="file" accept=".txt,.md,.markdown,.text,.pdf" onChange={handleFileUpload} className="hidden" />
             <textarea
               value={input}
               onChange={(e) => setInput(e.target.value)}

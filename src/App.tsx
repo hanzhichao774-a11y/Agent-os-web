@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import Header from './components/Header';
 import Sidebar from './components/Sidebar';
 import Dashboard from './components/Dashboard';
@@ -9,8 +9,27 @@ import AgentChat from './components/AgentChat';
 import SkillPage from './components/SkillPage';
 import SkillChat from './components/SkillChat';
 import RightPanel from './components/RightPanel';
+import WorkflowPage from './components/WorkflowPage';
+import { fetchProjects } from './services/api';
+import type { ProjectInfo } from './services/api';
 
-type ViewType = 'home' | 'project' | 'agent' | 'skill';
+export interface TeamAgentStatus {
+  name: string;
+  status: 'working' | 'done' | 'idle';
+  currentTask: string;
+}
+
+export interface TeamTaskStep {
+  name: string;
+  agent: string;
+  status: 'completed' | 'in-progress' | 'pending';
+  time: string;
+  startedAt?: number;
+  duration?: string;
+  tokens?: number;
+}
+
+type ViewType = 'home' | 'project' | 'agent' | 'skill' | 'workflow';
 
 function App() {
   const [activeView, setActiveView] = useState<ViewType>('home');
@@ -18,20 +37,46 @@ function App() {
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
   const [selectedSkillId, setSelectedSkillId] = useState<string | null>(null);
 
+  const [teamAgents, setTeamAgents] = useState<TeamAgentStatus[]>([]);
+  const [teamSteps, setTeamSteps] = useState<TeamTaskStep[]>([]);
+
+  const [projects, setProjects] = useState<ProjectInfo[]>([]);
+
+  const loadProjects = useCallback(() => {
+    fetchProjects().then(setProjects).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    loadProjects();
+  }, [loadProjects]);
+
   const handleNavigate = (view: string, projectId?: string) => {
     setActiveView(view as ViewType);
     if (projectId) {
       setActiveProjectId(projectId);
     }
-    // 切换视图时重置选中状态
     if (view !== 'agent') setSelectedAgentId(null);
     if (view !== 'skill') setSelectedSkillId(null);
   };
+
+  const handleResetTeamState = useCallback(() => {
+    setTeamAgents([]);
+    setTeamSteps([]);
+  }, []);
+
+  const handleUpdateTeamAgents = useCallback((updater: (prev: TeamAgentStatus[]) => TeamAgentStatus[]) => {
+    setTeamAgents(updater);
+  }, []);
+
+  const handleUpdateTeamSteps = useCallback((updater: (prev: TeamTaskStep[]) => TeamTaskStep[]) => {
+    setTeamSteps(updater);
+  }, []);
 
   const isProjectView = activeView === 'project' && activeProjectId;
   const isHomeView = activeView === 'home';
   const isAgentView = activeView === 'agent';
   const isSkillView = activeView === 'skill';
+  const isWorkflowView = activeView === 'workflow';
 
   const hasAgentSelected = isAgentView && selectedAgentId;
   const hasSkillSelected = isSkillView && selectedSkillId;
@@ -44,10 +89,11 @@ function App() {
           activeView={activeView}
           activeProjectId={activeProjectId}
           onNavigate={handleNavigate}
+          projects={projects}
+          onRefreshProjects={loadProjects}
         />
 
         {isHomeView ? (
-          // 主页：可视化 3 : 聊天 1
           <>
             <div className="flex-[3] min-w-0 overflow-hidden">
               <Dashboard />
@@ -57,17 +103,27 @@ function App() {
             </div>
           </>
         ) : isProjectView ? (
-          // 项目群聊视图：可视化 3 : 聊天 2
           <>
             <div className="flex-[3] min-w-0 overflow-hidden">
-              <RightPanel activeView={activeView} activeProjectId={activeProjectId} />
+              <ProjectChat
+                projectId={activeProjectId!}
+                projectName={projects.find(p => p.id === activeProjectId)?.name || activeProjectId!}
+                projectDescription={projects.find(p => p.id === activeProjectId)?.description || ''}
+                onResetTeamState={handleResetTeamState}
+                onUpdateTeamAgents={handleUpdateTeamAgents}
+                onUpdateTeamSteps={handleUpdateTeamSteps}
+              />
             </div>
             <div className="flex-[2] min-w-0 overflow-hidden">
-              <ProjectChat projectId={activeProjectId!} />
+              <RightPanel
+                activeView={activeView}
+                activeProjectId={activeProjectId}
+                teamAgents={teamAgents}
+                teamSteps={teamSteps}
+              />
             </div>
           </>
         ) : isAgentView ? (
-          // Agent 视图：列表 3 : 交互 1（选中时）
           <>
             <div className={`min-w-0 overflow-hidden ${hasAgentSelected ? 'flex-[3]' : 'flex-1'}`}>
               <AgentPage
@@ -82,7 +138,6 @@ function App() {
             )}
           </>
         ) : isSkillView ? (
-          // Skill 视图：列表 3 : 交互 1（选中时）
           <>
             <div className={`min-w-0 overflow-hidden ${hasSkillSelected ? 'flex-[3]' : 'flex-1'}`}>
               <SkillPage
@@ -96,6 +151,10 @@ function App() {
               </div>
             )}
           </>
+        ) : isWorkflowView ? (
+          <main className="flex-1 min-w-0 overflow-hidden">
+            <WorkflowPage />
+          </main>
         ) : (
           <main className="flex-1 min-w-0 overflow-hidden">
             {activeView === 'project' && !activeProjectId && <Dashboard />}

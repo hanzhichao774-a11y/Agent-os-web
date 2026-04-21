@@ -6,3 +6,6 @@ pymupdf>=1.27.0
 lancedb>=0.30.0
 pypdf>=6.0.0
 fastembed>=0.8.0
+pandas>=2.0.0
+duckdb>=1.0.0
+python-pptx>=1.0.0

@@ -27,6 +27,7 @@ dist-ssr
 backend/.venv/
 backend/data/
 backend/knowledge/docs/
+backend/workspace/
 backend/.env
 __pycache__/
 *.pyc

@@ -1,6 +1,7 @@
-import { useState } from 'react';
-import { Plus, Settings, TrendingUp, CheckCircle2, XCircle, MinusCircle, MessageSquare } from 'lucide-react';
-import { agents } from '../data/mockData';
+import { useState, useEffect } from 'react';
+import { Plus, Settings, TrendingUp, CheckCircle2, MessageSquare, Loader2 } from 'lucide-react';
+import { fetchAgents } from '../services/api';
+import type { AgentInfo } from '../services/api';
 
 interface AgentPageProps {
   selectedAgentId: string | null;
@@ -8,20 +9,30 @@ interface AgentPageProps {
 }
 
 export default function AgentPage({ selectedAgentId, onSelectAgent }: AgentPageProps) {
-  const [filter, setFilter] = useState<'all' | 'official' | 'third-party' | 'custom'>('all');
-  const filtered = filter === 'all' ? agents : agents.filter(a => a.type === filter);
+  const [agents, setAgents] = useState<AgentInfo[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [filter, setFilter] = useState<'all' | 'tools' | 'knowledge'>('all');
 
-  const typeLabels = {
-    official: { label: '官方', bg: 'bg-primary-light', text: 'text-primary-dark' },
-    'third-party': { label: '第三方', bg: 'bg-warning/10', text: 'text-warning' },
-    custom: { label: '自定义', bg: 'bg-success/10', text: 'text-success' },
-  };
+  useEffect(() => {
+    fetchAgents().then(data => {
+      setAgents(data);
+      setLoading(false);
+    }).catch(() => setLoading(false));
+  }, []);
 
-  const statusIcons = {
-    online: <CheckCircle2 className="w-3.5 h-3.5 text-success" />,
-    busy: <MinusCircle className="w-3.5 h-3.5 text-warning" />,
-    offline: <XCircle className="w-3.5 h-3.5 text-text-muted" />,
-  };
+  const filtered = filter === 'all'
+    ? agents
+    : filter === 'tools'
+      ? agents.filter(a => a.builtin_tools.length > 0)
+      : agents.filter(a => a.has_knowledge);
+
+  if (loading) {
+    return (
+      <div className="h-full flex items-center justify-center">
+        <Loader2 className="w-6 h-6 animate-spin text-primary" />
+      </div>
+    );
+  }
 
   return (
     <div className="h-full overflow-y-auto p-6">
@@ -29,7 +40,9 @@ export default function AgentPage({ selectedAgentId, onSelectAgent }: AgentPageP
         <div className="flex items-center justify-between mb-6">
           <div>
             <h1 className="text-xl font-semibold text-text">智能体广场</h1>
-            <p className="text-sm text-text-secondary mt-1">点击 Agent 卡片进入交互模式，共 {agents.length} 个</p>
+            <p className="text-sm text-text-secondary mt-1">
+              共 {agents.length} 个 Agent，点击卡片进入交互
+            </p>
           </div>
           <button className="flex items-center gap-2 px-4 py-2 bg-primary text-white rounded-lg text-sm font-medium hover:bg-primary-dark transition-colors">
             <Plus className="w-4 h-4" />
@@ -37,13 +50,11 @@ export default function AgentPage({ selectedAgentId, onSelectAgent }: AgentPageP
           </button>
         </div>
 
-        {/* Filter Tabs */}
         <div className="flex items-center gap-2 mb-6">
           {([
             { key: 'all', label: '全部' },
-            { key: 'official', label: '官方' },
-            { key: 'third-party', label: '第三方' },
-            { key: 'custom', label: '自定义' },
+            { key: 'tools', label: '有工具' },
+            { key: 'knowledge', label: '知识库' },
           ] as const).map((tab) => (
             <button
               key={tab.key}
@@ -59,11 +70,10 @@ export default function AgentPage({ selectedAgentId, onSelectAgent }: AgentPageP
           ))}
         </div>
 
-        {/* Agent Grid */}
         <div className="grid grid-cols-3 gap-4">
           {filtered.map((agent) => {
-            const type = typeLabels[agent.type];
             const isSelected = selectedAgentId === agent.id;
+            const toolCount = agent.builtin_tools.length + agent.custom_tools.length;
             return (
               <div
                 key={agent.id}
@@ -82,16 +92,16 @@ export default function AgentPage({ selectedAgentId, onSelectAgent }: AgentPageP
                     <div>
                       <h3 className="font-semibold text-text text-sm">{agent.name}</h3>
                       <div className="flex items-center gap-1.5 mt-0.5">
-                        {statusIcons[agent.status]}
-                        <span className="text-xs text-text-muted capitalize">
-                          {agent.status === 'online' ? '在线' : agent.status === 'busy' ? '忙碌' : '离线'}
-                        </span>
+                        <CheckCircle2 className="w-3.5 h-3.5 text-success" />
+                        <span className="text-xs text-text-muted">就绪</span>
                       </div>
                     </div>
                   </div>
-                  <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${type.bg} ${type.text}`}>
-                    {type.label}
-                  </span>
+                  {toolCount > 0 && (
+                    <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-primary-light text-primary-dark">
+                      {toolCount} 工具
+                    </span>
+                  )}
                 </div>
 
                 <p className="text-sm text-text-secondary mb-3 line-clamp-2">{agent.description}</p>
@@ -107,7 +117,7 @@ export default function AgentPage({ selectedAgentId, onSelectAgent }: AgentPageP
                 <div className="flex items-center justify-between pt-3 border-t border-border-light">
                   <div className="flex items-center gap-1 text-xs text-text-muted">
                     <TrendingUp className="w-3 h-3" />
-                    {agent.calls.toLocaleString()} 次调用
+                    {agent.builtin_tools.join(', ') || '无内置工具'}
                   </div>
                   <div className="flex items-center gap-1">
                     <button

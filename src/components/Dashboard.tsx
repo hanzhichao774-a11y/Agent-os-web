@@ -111,7 +111,7 @@ export default function Dashboard() {
                         <div className="text-[10px] text-text-muted mt-0.5 line-clamp-1">{agent.description}</div>
                       </div>
                     </div>
-                    <span className="w-2 h-2 rounded-full bg-emerald-400 mt-1.5 shrink-0" title="就绪" />
+                    <span className="w-2 h-2 rounded-full bg-emerald-400 dark:bg-emerald-500 mt-1.5 shrink-0" title="就绪" />
                   </div>
 
                   {/* Capabilities */}
@@ -126,19 +126,19 @@ export default function Dashboard() {
                   {/* Tools & Skills bar */}
                   <div className="flex items-center gap-2 text-[10px]">
                     {agent.builtin_tools.length > 0 && (
-                      <div className="flex items-center gap-1 bg-amber-50 text-amber-700 px-1.5 py-0.5 rounded">
+                      <div className="flex items-center gap-1 bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400 px-1.5 py-0.5 rounded">
                         <Wrench className="w-2.5 h-2.5" />
                         {agent.builtin_tools.length} 内置工具
                       </div>
                     )}
                     {mountedSkills > 0 && (
-                      <div className="flex items-center gap-1 bg-emerald-50 text-emerald-700 px-1.5 py-0.5 rounded">
+                      <div className="flex items-center gap-1 bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-400 px-1.5 py-0.5 rounded">
                         <Layers className="w-2.5 h-2.5" />
                         {mountedSkills} 技能
                       </div>
                     )}
                     {agent.has_knowledge && (
-                      <div className="flex items-center gap-1 bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded">
+                      <div className="flex items-center gap-1 bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-400 px-1.5 py-0.5 rounded">
                         <FileText className="w-2.5 h-2.5" />
                         知识库
                       </div>

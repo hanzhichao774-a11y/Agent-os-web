@@ -146,7 +146,8 @@ function KnowledgeGraph() {
                 y1={from.y}
                 x2={to.x}
                 y2={to.y}
-                stroke="#e5e7eb"
+                stroke="currentColor"
+                className="text-border"
                 strokeWidth={1.5}
               />
             );

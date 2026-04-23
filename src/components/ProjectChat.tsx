@@ -1,10 +1,10 @@
-import { useState, useRef, useEffect, useMemo } from 'react';
-import { Send, Loader2, Paperclip, Plus, FolderOpen } from 'lucide-react';
+import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
+import { Send, Loader2, Paperclip, Plus, FolderOpen, Download } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { streamTeamChat, uploadDocument, fetchTasks } from '../services/api';
 import type { TeamChatEvent, TaskInfo } from '../services/api';
-import type { TeamAgentStatus, TeamTaskStep } from '../App';
+import type { TeamAgentStatus, TeamTaskStep, OutputItem } from '../App';
 
 interface ProjectChatProps {
   projectId: string;
@@ -14,6 +14,7 @@ interface ProjectChatProps {
   onResetTeamState: () => void;
   onUpdateTeamAgents: (updater: (prev: TeamAgentStatus[]) => TeamAgentStatus[]) => void;
   onUpdateTeamSteps: (updater: (prev: TeamTaskStep[]) => TeamTaskStep[]) => void;
+  onOutputsChange: (items: OutputItem[]) => void;
 }
 
 interface ChatMsg {
@@ -81,7 +82,71 @@ const MEMBER_COLORS = [
   { bg: 'bg-violet-500', text: 'text-white' },
 ];
 
-export default function ProjectChat({ projectId, taskId, projectName, projectDescription, onResetTeamState, onUpdateTeamAgents, onUpdateTeamSteps }: ProjectChatProps) {
+const OUTPUT_TYPE_PATTERN = /已生成(柱状图|折线图|饼图|散点图|热力图|雷达图|表格|报告|文档|PPT|PDF|图表)[：:]\s*(.+)/g;
+const OUTPUT_FILE_PATTERN = /已生成\s+(\S+\.(pdf|xlsx|xls|csv|png|jpg|pptx?|docx?|txt|md))/gi;
+
+function parseOutputItems(content: string, msgId: string, agentName?: string, timestamp?: string): OutputItem[] {
+  const items: OutputItem[] = [];
+  const seen = new Set<string>();
+
+  let match: RegExpExecArray | null;
+
+  const typeRe = new RegExp(OUTPUT_TYPE_PATTERN.source, 'g');
+  while ((match = typeRe.exec(content)) !== null) {
+    const type = match[1];
+    const title = match[2].trim();
+    const key = `${type}:${title}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      items.push({
+        id: `${msgId}_out_${items.length}`,
+        title,
+        type,
+        agentName,
+        timestamp: timestamp || '',
+      });
+    }
+  }
+
+  const fileRe = new RegExp(OUTPUT_FILE_PATTERN.source, 'gi');
+  while ((match = fileRe.exec(content)) !== null) {
+    const fileName = match[1];
+    const ext = match[2].toUpperCase();
+    const key = `file:${fileName}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      items.push({
+        id: `${msgId}_file_${items.length}`,
+        title: fileName,
+        type: ext,
+        agentName,
+        timestamp: timestamp || '',
+      });
+    }
+  }
+
+  return items;
+}
+
+function OutputCards({ items }: { items: OutputItem[] }) {
+  if (items.length === 0) return null;
+  return (
+    <div className="mt-3 space-y-2">
+      {items.map((item) => (
+        <div
+          key={item.id}
+          className="flex items-center gap-3 border border-border rounded-lg px-4 py-3 hover:bg-primary/5 transition-colors cursor-pointer group"
+        >
+          <Download className="w-4 h-4 text-primary shrink-0" />
+          <span className="flex-1 text-sm font-medium text-primary truncate">{item.title}</span>
+          <span className="text-xs text-primary font-medium shrink-0">{item.type}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+export default function ProjectChat({ projectId, taskId, projectName, projectDescription, onResetTeamState, onUpdateTeamAgents, onUpdateTeamSteps, onOutputsChange }: ProjectChatProps) {
   const [messages, setMessages] = useState<ChatMsg[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -98,6 +163,22 @@ export default function ProjectChat({ projectId, taskId, projectName, projectDes
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
+
+  const extractOutputs = useCallback(() => {
+    const allOutputs: OutputItem[] = [];
+    for (const msg of messagesRef.current) {
+      if (msg.role === 'member' || msg.role === 'leader') {
+        const items = parseOutputItems(msg.content, msg.id, msg.agentName, msg.timestamp);
+        allOutputs.push(...items);
+      }
+    }
+    return allOutputs;
+  }, []);
+
+  useEffect(() => {
+    const outputs = extractOutputs();
+    onOutputsChange(outputs);
+  }, [messages, extractOutputs, onOutputsChange]);
 
   useEffect(() => {
     const newSessionId = `team_${projectId}_task_${taskId || 'main'}`;
@@ -383,6 +464,7 @@ export default function ProjectChat({ projectId, taskId, projectName, projectDes
           }
 
           if (msg.role === 'leader') {
+            const leaderOutputs = parseOutputItems(msg.content, msg.id, msg.agentName, msg.timestamp);
             return (
               <div key={msg.id} className="flex gap-3">
                 <div className="w-8 h-8 rounded-full bg-amber-500 flex items-center justify-center shrink-0">
@@ -401,6 +483,7 @@ export default function ProjectChat({ projectId, taskId, projectName, projectDes
                         <MarkdownContent content={msg.content} />
                       )}
                     </div>
+                    <OutputCards items={leaderOutputs} />
                   </div>
                 </div>
               </div>
@@ -410,6 +493,7 @@ export default function ProjectChat({ projectId, taskId, projectName, projectDes
           if (msg.role === 'member') {
             const initial = getAgentInitial(msg.agentName);
             const agentLabel = msg.agentName?.replace(/^\S+\s/, '') || '成员';
+            const memberOutputs = parseOutputItems(msg.content, msg.id, msg.agentName, msg.timestamp);
 
             return (
               <div key={msg.id} className="flex gap-3">
@@ -429,6 +513,7 @@ export default function ProjectChat({ projectId, taskId, projectName, projectDes
                         <MarkdownContent content={msg.content} />
                       )}
                     </div>
+                    <OutputCards items={memberOutputs} />
                   </div>
                 </div>
               </div>

@@ -3,6 +3,8 @@ import Sidebar from './components/Sidebar';
 import Dashboard from './components/Dashboard';
 import BizAgent from './components/BizAgent';
 import ProjectChat from './components/ProjectChat';
+import ProjectDashboard from './components/ProjectDashboard';
+import ProjectFilePanel from './components/ProjectFilePanel';
 import AgentPage from './components/AgentPage';
 import SkillPage from './components/SkillPage';
 import RightPanel from './components/RightPanel';
@@ -25,6 +27,14 @@ export interface TeamTaskStep {
   tokens?: number;
 }
 
+export interface OutputItem {
+  id: string;
+  title: string;
+  type: string;
+  agentName?: string;
+  timestamp: string;
+}
+
 type ViewType = 'home' | 'project' | 'agent' | 'skill';
 
 function App() {
@@ -36,6 +46,7 @@ function App() {
 
   const [teamAgents, setTeamAgents] = useState<TeamAgentStatus[]>([]);
   const [teamSteps, setTeamSteps] = useState<TeamTaskStep[]>([]);
+  const [chatOutputs, setChatOutputs] = useState<OutputItem[]>([]);
 
   const [projects, setProjects] = useState<ProjectInfo[]>([]);
 
@@ -79,6 +90,11 @@ function App() {
   const isAgentView = activeView === 'agent';
   const isSkillView = activeView === 'skill';
 
+  const isProjectDashboard = isProjectView && activeTaskId === null;
+  const isTaskChat = isProjectView && activeTaskId !== null;
+  const chatTaskId = activeTaskId === '_main' ? null : activeTaskId;
+
+  const currentProject = projects.find(p => p.id === activeProjectId);
   const showBizAgent = !isProjectView;
 
   return (
@@ -98,17 +114,31 @@ function App() {
           <div className="flex-1 min-w-0 overflow-hidden">
             <Dashboard />
           </div>
-        ) : isProjectView ? (
+        ) : isProjectDashboard ? (
+          <>
+            <div className="flex-1 min-w-0 overflow-hidden">
+              <ProjectDashboard
+                projectId={activeProjectId!}
+                projectName={currentProject?.name || activeProjectId!}
+                projectDescription={currentProject?.description || ''}
+              />
+            </div>
+            <div className="w-72 shrink-0 overflow-hidden">
+              <ProjectFilePanel projectId={activeProjectId!} />
+            </div>
+          </>
+        ) : isTaskChat ? (
           <>
             <div className="flex-[3] min-w-0 overflow-hidden">
               <ProjectChat
                 projectId={activeProjectId!}
-                taskId={activeTaskId}
-                projectName={projects.find(p => p.id === activeProjectId)?.name || activeProjectId!}
-                projectDescription={projects.find(p => p.id === activeProjectId)?.description || ''}
+                taskId={chatTaskId}
+                projectName={currentProject?.name || activeProjectId!}
+                projectDescription={currentProject?.description || ''}
                 onResetTeamState={handleResetTeamState}
                 onUpdateTeamAgents={handleUpdateTeamAgents}
                 onUpdateTeamSteps={handleUpdateTeamSteps}
+                onOutputsChange={setChatOutputs}
               />
             </div>
             <div className="flex-[2] min-w-0 overflow-hidden">
@@ -117,6 +147,7 @@ function App() {
                 activeProjectId={activeProjectId}
                 teamAgents={teamAgents}
                 teamSteps={teamSteps}
+                outputs={chatOutputs}
               />
             </div>
           </>

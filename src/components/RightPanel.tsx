@@ -1,96 +1,151 @@
-import { useState } from 'react';
-import {
-  Bot, Shield, Network, CheckCircle2, Circle, Loader2, Terminal,
-  ArrowRight, Clock
-} from 'lucide-react';
-import type { TeamAgentStatus, TeamTaskStep } from '../App';
-import { auditLogs } from '../data/mockData';
+import { useState, useEffect } from 'react';
+import { Circle, FileText, Network } from 'lucide-react';
+import { fetchWorkspaceFiles } from '../services/api';
+import type { WorkspaceFile } from '../services/api';
+import type { OutputItem } from '../App';
 
 interface RightPanelProps {
   activeView: string;
   activeProjectId: string | null;
-  teamAgents: TeamAgentStatus[];
-  teamSteps: TeamTaskStep[];
+  teamAgents: unknown[];
+  teamSteps: unknown[];
+  outputs: OutputItem[];
 }
 
-type BottomTabKey = 'agents' | 'knowledge' | 'audit';
+type TabKey = 'data' | 'files' | 'graph';
 
-const bottomTabs: { key: BottomTabKey; label: string; icon: React.ElementType }[] = [
-  { key: 'agents', label: 'Agent 状态', icon: Bot },
-  { key: 'knowledge', label: '知识图谱', icon: Network },
-  { key: 'audit', label: '审计日志', icon: Shield },
+const tabs: { key: TabKey; label: string; icon: React.ElementType }[] = [
+  { key: 'data', label: '数据', icon: Circle },
+  { key: 'files', label: '文件', icon: FileText },
+  { key: 'graph', label: '图谱', icon: Network },
 ];
 
-function TaskFlowHorizontal({ steps }: { steps: TeamTaskStep[] }) {
-  if (steps.length === 0) {
-    return (
-      <div className="h-full flex flex-col px-4 py-2">
-        <h3 className="text-xs font-semibold text-text-muted uppercase tracking-wider mb-2 shrink-0">任务执行流</h3>
-        <div className="flex-1 flex items-center justify-center min-h-0">
-          <div className="flex flex-col items-center gap-1.5 text-text-muted">
-            <Clock className="w-4 h-4 opacity-40" />
-            <span className="text-[10px]">等待任务开始...</span>
-          </div>
-        </div>
-      </div>
-    );
-  }
+const EXT_COLORS: Record<string, { bg: string; text: string }> = {
+  xlsx: { bg: 'bg-emerald-100 dark:bg-emerald-900/30', text: 'text-emerald-600 dark:text-emerald-400' },
+  xls: { bg: 'bg-emerald-100 dark:bg-emerald-900/30', text: 'text-emerald-600 dark:text-emerald-400' },
+  csv: { bg: 'bg-red-100 dark:bg-red-900/30', text: 'text-red-600 dark:text-red-400' },
+  md: { bg: 'bg-purple-100 dark:bg-purple-900/30', text: 'text-purple-600 dark:text-purple-400' },
+  txt: { bg: 'bg-gray-100 dark:bg-gray-800', text: 'text-gray-600 dark:text-gray-400' },
+  pdf: { bg: 'bg-red-100 dark:bg-red-900/30', text: 'text-red-600 dark:text-red-400' },
+  png: { bg: 'bg-pink-100 dark:bg-pink-900/30', text: 'text-pink-600 dark:text-pink-400' },
+  jpg: { bg: 'bg-pink-100 dark:bg-pink-900/30', text: 'text-pink-600 dark:text-pink-400' },
+  json: { bg: 'bg-amber-100 dark:bg-amber-900/30', text: 'text-amber-600 dark:text-amber-400' },
+  py: { bg: 'bg-blue-100 dark:bg-blue-900/30', text: 'text-blue-600 dark:text-blue-400' },
+};
 
-  const completedCount = steps.filter(s => s.status === 'completed').length;
+const DEFAULT_EXT_COLOR = { bg: 'bg-gray-100 dark:bg-gray-800', text: 'text-gray-500 dark:text-gray-400' };
+
+const OUTPUT_TYPE_COLORS: Record<string, { bg: string; text: string }> = {
+  '柱状图': { bg: 'bg-blue-100 dark:bg-blue-900/30', text: 'text-blue-600 dark:text-blue-400' },
+  '折线图': { bg: 'bg-emerald-100 dark:bg-emerald-900/30', text: 'text-emerald-600 dark:text-emerald-400' },
+  '饼图': { bg: 'bg-amber-100 dark:bg-amber-900/30', text: 'text-amber-600 dark:text-amber-400' },
+  '散点图': { bg: 'bg-violet-100 dark:bg-violet-900/30', text: 'text-violet-600 dark:text-violet-400' },
+  '热力图': { bg: 'bg-red-100 dark:bg-red-900/30', text: 'text-red-600 dark:text-red-400' },
+  '雷达图': { bg: 'bg-cyan-100 dark:bg-cyan-900/30', text: 'text-cyan-600 dark:text-cyan-400' },
+  '表格': { bg: 'bg-emerald-100 dark:bg-emerald-900/30', text: 'text-emerald-600 dark:text-emerald-400' },
+  '报告': { bg: 'bg-red-100 dark:bg-red-900/30', text: 'text-red-600 dark:text-red-400' },
+  '文档': { bg: 'bg-blue-100 dark:bg-blue-900/30', text: 'text-blue-600 dark:text-blue-400' },
+  'PPT': { bg: 'bg-orange-100 dark:bg-orange-900/30', text: 'text-orange-600 dark:text-orange-400' },
+  'PDF': { bg: 'bg-red-100 dark:bg-red-900/30', text: 'text-red-600 dark:text-red-400' },
+};
+
+const DEFAULT_OUTPUT_COLOR = { bg: 'bg-gray-100 dark:bg-gray-800', text: 'text-gray-500 dark:text-gray-400' };
+
+function getExtLabel(name: string) {
+  const ext = name.split('.').pop()?.toLowerCase() || '';
+  const colors = EXT_COLORS[ext] || DEFAULT_EXT_COLOR;
+  return { ext: ext.toUpperCase() || 'FILE', colors };
+}
+
+function formatSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes}B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)}KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
+}
+
+
+function DataOutputPanel({ outputs }: { outputs: OutputItem[] }) {
+  return (
+    <div className="h-full overflow-y-auto px-4 py-4">
+      <h4 className="text-xs font-semibold text-text-muted uppercase tracking-wider mb-3">数据产出</h4>
+      {outputs.length === 0 ? (
+        <p className="text-xs text-text-muted py-6 text-center">对话中尚无产出</p>
+      ) : (
+        <div className="space-y-3">
+          {outputs.map((item) => (
+            <div key={item.id} className="border border-border rounded-xl p-4 hover:border-primary/30 transition-colors cursor-pointer">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <h5 className="text-sm font-semibold text-text mb-1">{item.title}</h5>
+                  {item.agentName && <p className="text-xs text-text-muted">由 {item.agentName.replace(/^\S+\s/, '')} 生成</p>}
+                </div>
+                <span className="text-[11px] px-2 py-0.5 rounded-full bg-primary/10 text-primary font-medium shrink-0">
+                  {item.type}
+                </span>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function FilesPanel({ outputs }: { outputs: OutputItem[] }) {
+  const [files, setFiles] = useState<WorkspaceFile[]>([]);
+
+  useEffect(() => {
+    fetchWorkspaceFiles().then(setFiles).catch(() => {});
+  }, []);
 
   return (
-    <div className="h-full flex flex-col px-4 py-2">
-      <div className="flex items-center justify-between mb-2 shrink-0">
-        <h3 className="text-xs font-semibold text-text-muted uppercase tracking-wider">任务执行流</h3>
-        <span className="text-[10px] text-text-muted">{completedCount}/{steps.length} 完成</span>
-      </div>
-      <div className="flex-1 flex items-center min-h-0">
-        <div className="flex items-center gap-0.5 w-full overflow-x-auto pb-1">
-          {steps.map((step, i) => {
-            const isLast = i === steps.length - 1;
+    <div className="h-full overflow-y-auto px-4 py-4 space-y-6">
+      {/* Uploaded files */}
+      <div>
+        <h4 className="text-xs font-semibold text-text-muted uppercase tracking-wider mb-3">上传文件</h4>
+        <div className="space-y-1">
+          {files.length === 0 && (
+            <p className="text-xs text-text-muted py-3 text-center">暂无上传文件</p>
+          )}
+          {files.map(f => {
+            const { ext, colors } = getExtLabel(f.name);
             return (
-              <div key={`${step.agent}-${i}`} className="flex items-center gap-0.5 shrink-0">
-                <div className="flex flex-col items-center min-w-[64px] max-w-[72px]">
-                  <div className={`w-6 h-6 rounded-full flex items-center justify-center border-[1.5px] mb-1 ${
-                    step.status === 'completed'
-                      ? 'bg-success/10 border-success text-success'
-                      : step.status === 'in-progress'
-                      ? 'bg-warning/10 border-warning text-warning'
-                      : 'bg-bg border-border text-text-muted'
-                  }`}>
-                    {step.status === 'completed' && <CheckCircle2 className="w-3 h-3" />}
-                    {step.status === 'in-progress' && <Loader2 className="w-3 h-3 animate-spin" />}
-                    {step.status === 'pending' && <Circle className="w-3 h-3" />}
-                  </div>
-                  <span className={`text-[10px] font-medium text-center leading-tight truncate w-full ${
-                    step.status === 'completed' ? 'text-success' :
-                    step.status === 'in-progress' ? 'text-warning' : 'text-text-muted'
-                  }`} title={step.name}>
-                    {step.name}
-                  </span>
-                  {step.status === 'completed' && step.duration && (
-                    <span className="text-[9px] text-text-muted/70 mt-0.5 flex items-center gap-0.5">
-                      <Clock className="w-2 h-2" />{step.duration}
-                    </span>
-                  )}
-                  {step.status === 'completed' && step.tokens && (
-                    <span className="text-[9px] text-text-muted/70 flex items-center gap-0.5">
-                      <Terminal className="w-2 h-2" />{step.tokens > 1000 ? `${(step.tokens / 1000).toFixed(1)}k` : step.tokens}
-                    </span>
-                  )}
-                  {step.status === 'in-progress' && (
-                    <span className="text-[9px] text-warning/70 mt-0.5">执行中...</span>
-                  )}
+              <div key={f.name} className="flex items-center gap-3 px-2 py-2.5 rounded-lg hover:bg-bg transition-colors">
+                <span className={`text-[10px] font-bold px-2 py-1 rounded-md ${colors.bg} ${colors.text} shrink-0 min-w-[40px] text-center`}>
+                  {ext}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm text-text font-medium truncate">{f.name}</p>
+                  <p className="text-[10px] text-text-muted">{formatSize(f.size)}</p>
                 </div>
-
-                {!isLast && (
-                  <ArrowRight className={`w-3 h-3 shrink-0 mx-0.5 ${
-                    step.status === 'completed' ? 'text-success/40' : 'text-border'
-                  }`} />
-                )}
               </div>
             );
           })}
+        </div>
+      </div>
+
+      {/* Output files from chat */}
+      <div>
+        <h4 className="text-xs font-semibold text-text-muted uppercase tracking-wider mb-3">产出</h4>
+        <div className="space-y-1">
+          {outputs.length === 0 ? (
+            <p className="text-xs text-text-muted py-3 text-center">对话中尚无产出文件</p>
+          ) : (
+            outputs.map(item => {
+              const typeColors = OUTPUT_TYPE_COLORS[item.type] || DEFAULT_OUTPUT_COLOR;
+              return (
+                <div key={item.id} className="flex items-center gap-3 px-2 py-2.5 rounded-lg hover:bg-bg transition-colors cursor-pointer">
+                  <span className={`text-[10px] font-bold px-2 py-1 rounded-md ${typeColors.bg} ${typeColors.text} shrink-0 min-w-[40px] text-center`}>
+                    {item.type}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm text-text font-medium truncate">{item.title}</p>
+                    {item.agentName && <p className="text-[10px] text-text-muted">{item.agentName.replace(/^\S+\s/, '')}</p>}
+                  </div>
+                </div>
+              );
+            })
+          )}
         </div>
       </div>
     </div>
@@ -99,15 +154,15 @@ function TaskFlowHorizontal({ steps }: { steps: TeamTaskStep[] }) {
 
 function KnowledgeGraph() {
   const nodes = [
-    { id: 'project', label: 'Q3财报分析', x: 200, y: 140, type: 'project', color: '#4f46e5' },
-    { id: 'file', label: 'sales_q3.xlsx', x: 80, y: 80, type: 'file', color: '#059669' },
-    { id: 'agent1', label: '数据分析Agent', x: 320, y: 80, type: 'agent', color: '#7c3aed' },
-    { id: 'skill1', label: '图表生成', x: 320, y: 200, type: 'skill', color: '#6b7280' },
-    { id: 'metric1', label: '云服务\n3,240万', x: 120, y: 200, type: 'metric', color: '#3b82f6' },
-    { id: 'metric2', label: '企业服务\n2,890万', x: 200, y: 240, type: 'metric', color: '#3b82f6' },
-    { id: 'metric3', label: '消费者业务\n1,560万', x: 80, y: 260, type: 'metric', color: '#f59e0b' },
-    { id: 'metric4', label: '海外市场\n980万', x: 280, y: 260, type: 'metric', color: '#10b981' },
-    { id: 'insight', label: '增长双引擎', x: 360, y: 140, type: 'insight', color: '#ef4444' },
+    { id: 'project', label: 'Q3财报分析', x: 200, y: 140, type: 'project', color: '#1e3a5f' },
+    { id: 'file', label: 'sales_q3.xlsx', x: 80, y: 80, type: 'file', color: '#475569' },
+    { id: 'agent1', label: '数据分析Agent', x: 320, y: 80, type: 'agent', color: '#0d9488' },
+    { id: 'skill1', label: '图表生成', x: 320, y: 200, type: 'skill', color: '#7c3aed' },
+    { id: 'metric1', label: '云服务\n3,240万', x: 120, y: 200, type: 'metric', color: '#57534e' },
+    { id: 'metric2', label: '企业服务\n2,890万', x: 200, y: 240, type: 'metric', color: '#57534e' },
+    { id: 'metric3', label: '消费者业务\n1,560万', x: 80, y: 260, type: 'metric', color: '#d97706' },
+    { id: 'metric4', label: '海外市场\n980万', x: 280, y: 260, type: 'metric', color: '#059669' },
+    { id: 'insight', label: '增长双引擎', x: 360, y: 140, type: 'insight', color: '#dc2626' },
   ];
 
   const edges = [
@@ -130,7 +185,7 @@ function KnowledgeGraph() {
   return (
     <div className="h-full flex flex-col px-4 py-3">
       <div className="flex items-center justify-between mb-2 shrink-0">
-        <h3 className="text-sm font-semibold text-text">项目知识图谱</h3>
+        <h3 className="text-sm font-semibold text-text">项目关系图谱</h3>
         <span className="text-[10px] text-text-muted">{nodes.length} 实体 · {edges.length} 关系</span>
       </div>
       <div className="flex-1 bg-bg rounded-xl border border-border overflow-hidden relative min-h-0">
@@ -184,12 +239,12 @@ function KnowledgeGraph() {
 
         <div className="absolute bottom-2 left-2 flex flex-wrap gap-x-3 gap-y-1">
           {[
-            { label: '项目', color: '#4f46e5' },
-            { label: '文件', color: '#059669' },
-            { label: 'Agent', color: '#7c3aed' },
-            { label: 'Skill', color: '#6b7280' },
-            { label: '指标', color: '#3b82f6' },
-            { label: '洞察', color: '#ef4444' },
+            { label: '项目', color: '#1e3a5f' },
+            { label: '文件', color: '#475569' },
+            { label: 'Agent', color: '#0d9488' },
+            { label: 'Skill', color: '#7c3aed' },
+            { label: '指标', color: '#57534e' },
+            { label: '洞察', color: '#dc2626' },
           ].map(item => (
             <div key={item.label} className="flex items-center gap-1">
               <span className="w-2 h-2 rounded-full" style={{ background: item.color }} />
@@ -202,110 +257,40 @@ function KnowledgeGraph() {
   );
 }
 
-function AgentStatusPanel({ agents }: { agents: TeamAgentStatus[] }) {
-  const LEADER: TeamAgentStatus = { name: '👑 Team Leader', status: 'idle', currentTask: '待命中，随时协调任务' };
-  const hasLeader = agents.some(a => a.name.includes('Leader'));
-  const displayAgents = hasLeader ? agents : [LEADER, ...agents];
-
-  const workingCount = displayAgents.filter(a => a.status === 'working').length;
-  const doneCount = displayAgents.filter(a => a.status === 'done').length;
-  const onlineCount = displayAgents.length;
-
-  return (
-    <div className="h-full flex flex-col px-4 py-3 space-y-3 overflow-y-auto">
-      <div className="flex items-center justify-between shrink-0">
-        <h3 className="text-sm font-semibold text-text">活跃 Agent</h3>
-        <span className="text-[10px] text-text-muted">
-          {onlineCount} 在线{workingCount > 0 ? ` · ${workingCount} 执行中` : ''}{doneCount > 0 ? ` · ${doneCount} 已完成` : ''}
-        </span>
-      </div>
-      {displayAgents.map((a, i) => {
-        const isLeader = a.name.includes('Leader');
-        return (
-          <div key={`${a.name}-${i}`} className={`border rounded-lg p-3 ${isLeader ? 'bg-amber-50/50 dark:bg-amber-900/10 border-amber-200 dark:border-amber-800/30' : 'bg-bg border-border'}`}>
-            <div className="flex items-center justify-between mb-1">
-              <div className="flex items-center gap-2">
-                <span className={`w-2 h-2 rounded-full ${
-                  a.status === 'working' ? 'bg-warning animate-pulse' :
-                  a.status === 'done' ? 'bg-success' :
-                  isLeader ? 'bg-success' : 'bg-text-muted'
-                }`} />
-                <span className="text-sm font-medium text-text">{a.name}</span>
-              </div>
-              <span className={`text-xs px-1.5 py-0.5 rounded ${
-                a.status === 'working' ? 'bg-warning/10 text-warning' :
-                a.status === 'done' ? 'bg-success/10 text-success' :
-                isLeader ? 'bg-success/10 text-success' :
-                'bg-agent-normal/10 text-agent-normal'
-              }`}>
-                {a.status === 'working' ? '执行中' : a.status === 'done' ? '已完成' : isLeader ? '在线' : '等待'}
-              </span>
-            </div>
-            <div className="text-xs text-text-secondary">{a.currentTask}</div>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-function AuditPanel() {
-  return (
-    <div className="h-full flex flex-col px-4 py-3 overflow-y-auto">
-      <h3 className="text-sm font-semibold text-text mb-2 shrink-0">审计日志</h3>
-      <div className="space-y-2">
-        {auditLogs.map((log, i) => (
-          <div key={i} className="flex items-start gap-2 text-xs">
-            <Terminal className="w-3 h-3 text-text-muted shrink-0 mt-0.5" />
-            <div>
-              <div className="text-text-muted">{log.time}</div>
-              <div className="text-text-secondary">{log.event}</div>
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-export default function RightPanel({ activeView, activeProjectId, teamAgents, teamSteps }: RightPanelProps) {
-  const [bottomTab, setBottomTab] = useState<BottomTabKey>('agents');
+export default function RightPanel({ activeView, activeProjectId, outputs }: RightPanelProps) {
+  const [activeTab, setActiveTab] = useState<TabKey>('data');
 
   const isProjectView = activeView === 'project' && activeProjectId;
   if (!isProjectView) return null;
 
   return (
     <div className="w-full h-full flex flex-col bg-surface border-l border-border">
-      <div className="h-[15%] shrink-0 border-b border-border">
-        <TaskFlowHorizontal steps={teamSteps} />
+      {/* Tab bar */}
+      <div className="flex items-center border-b border-border shrink-0">
+        {tabs.map((tab) => {
+          const Icon = tab.icon;
+          return (
+            <button
+              key={tab.key}
+              onClick={() => setActiveTab(tab.key)}
+              className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 text-xs font-medium border-b-2 transition-colors ${
+                activeTab === tab.key
+                  ? 'border-primary text-primary-dark'
+                  : 'border-transparent text-text-secondary hover:text-text'
+              }`}
+            >
+              <Icon className="w-3.5 h-3.5" />
+              {tab.label}
+            </button>
+          );
+        })}
       </div>
 
-      <div className="flex-1 min-h-0 flex flex-col">
-        <div className="flex items-center border-b border-border shrink-0">
-          {bottomTabs.map((tab) => {
-            const Icon = tab.icon;
-            return (
-              <button
-                key={tab.key}
-                onClick={() => setBottomTab(tab.key)}
-                className={`flex-1 flex items-center justify-center gap-1.5 py-2 text-xs font-medium border-b-2 transition-colors ${
-                  bottomTab === tab.key
-                    ? 'border-primary text-primary-dark'
-                    : 'border-transparent text-text-secondary hover:text-text'
-                }`}
-              >
-                <Icon className="w-3.5 h-3.5" />
-                {tab.label}
-              </button>
-            );
-          })}
-        </div>
-
-        <div className="flex-1 min-h-0 overflow-hidden">
-          {bottomTab === 'agents' && <AgentStatusPanel agents={teamAgents} />}
-          {bottomTab === 'knowledge' && <KnowledgeGraph />}
-          {bottomTab === 'audit' && <AuditPanel />}
-        </div>
+      {/* Tab content */}
+      <div className="flex-1 min-h-0 overflow-hidden">
+        {activeTab === 'data' && <DataOutputPanel outputs={outputs} />}
+        {activeTab === 'files' && <FilesPanel outputs={outputs} />}
+        {activeTab === 'graph' && <KnowledgeGraph />}
       </div>
     </div>
   );

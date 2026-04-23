@@ -30,6 +30,31 @@ export default function Sidebar({ activeView, activeProjectId, activeTaskId, onN
   const [creating, setCreating] = useState(false);
   const { isDark, toggle: toggleDark } = useDarkMode();
 
+  const [taskModalProjectId, setTaskModalProjectId] = useState<string | null>(null);
+  const [newTaskName, setNewTaskName] = useState('');
+  const [newTaskDesc, setNewTaskDesc] = useState('');
+  const [creatingTask, setCreatingTask] = useState(false);
+  const [taskLoadTrigger, setTaskLoadTrigger] = useState(0);
+
+  const taskModalProject = taskModalProjectId ? projects.find(p => p.id === taskModalProjectId) : null;
+
+  const handleCreateTask = async () => {
+    if (!newTaskName.trim() || creatingTask || !taskModalProjectId) return;
+    setCreatingTask(true);
+    try {
+      const task = await createTask(taskModalProjectId, newTaskName.trim());
+      setTaskModalProjectId(null);
+      setNewTaskName('');
+      setNewTaskDesc('');
+      setTaskLoadTrigger(prev => prev + 1);
+      onNavigate('project', taskModalProjectId, task.id);
+    } catch {
+      // ignore
+    } finally {
+      setCreatingTask(false);
+    }
+  };
+
   const [expandedProjects, setExpandedProjects] = useState<Set<string>>(new Set());
 
   const toggleExpand = (projectId: string) => {
@@ -80,7 +105,7 @@ export default function Sidebar({ activeView, activeProjectId, activeTaskId, onN
 
   return (
     <aside
-      className={`bg-surface border-r border-border flex flex-col shrink-0 transition-all duration-300 ${
+      className={`bg-sidebar-bg border-r border-border flex flex-col shrink-0 transition-all duration-300 ${
         collapsed ? 'w-14' : 'w-56'
       }`}
     >
@@ -113,12 +138,12 @@ export default function Sidebar({ activeView, activeProjectId, activeTaskId, onN
                 key={item.key}
                 onClick={() => onNavigate(item.key)}
                 title={collapsed ? item.label : undefined}
-                className={`w-full flex items-center rounded-lg text-sm font-medium transition-colors ${
-                  collapsed ? 'justify-center px-2 py-2' : 'gap-2.5 px-2.5 py-1.5'
+                className={`w-full flex items-center rounded-xl text-[13px] font-medium transition-all duration-200 ${
+                  collapsed ? 'justify-center px-2 py-2.5' : 'gap-2.5 px-3 py-2'
                 } ${
                   isActive
-                    ? 'bg-primary-light text-primary-dark'
-                    : 'text-text-secondary hover:bg-bg hover:text-text'
+                    ? 'bg-primary-subtle text-primary-dark'
+                    : 'text-text-secondary hover:bg-primary/5 hover:text-text'
                 }`}
               >
                 <Icon className="w-[18px] h-[18px] shrink-0" />
@@ -159,6 +184,8 @@ export default function Sidebar({ activeView, activeProjectId, activeTaskId, onN
                 onToggleExpand={() => toggleExpand(project.id)}
                 onNavigate={onNavigate}
                 onDelete={handleDeleteProject}
+                onOpenTaskModal={() => setTaskModalProjectId(project.id)}
+                taskLoadTrigger={taskLoadTrigger}
               />
             );
           })}
@@ -241,6 +268,58 @@ export default function Sidebar({ activeView, activeProjectId, activeTaskId, onN
           </div>
         </div>
       )}
+
+      {taskModalProjectId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="bg-surface border border-border rounded-2xl shadow-xl w-[480px] p-6 relative">
+            <button
+              onClick={() => { setTaskModalProjectId(null); setNewTaskName(''); setNewTaskDesc(''); }}
+              className="absolute top-5 right-5 p-1 hover:bg-bg rounded-lg transition-colors text-text-muted hover:text-text"
+            >
+              <X className="w-4 h-4" />
+            </button>
+
+            <h3 className="text-lg font-bold text-text mb-1">新建任务</h3>
+            <p className="text-sm text-text-muted mb-5">项目：{taskModalProject?.name || ''}</p>
+
+            <div className="flex items-center gap-3 bg-bg border border-border rounded-xl px-4 py-3 mb-4">
+              <Plus className="w-4 h-4 text-text-muted shrink-0" />
+              <input
+                value={newTaskName}
+                onChange={(e) => setNewTaskName(e.target.value)}
+                placeholder="请输入任务名称"
+                autoFocus
+                className="flex-1 bg-transparent outline-none text-sm text-text placeholder:text-text-muted"
+              />
+            </div>
+
+            <label className="text-sm font-medium text-text mb-2 block">描述</label>
+            <textarea
+              value={newTaskDesc}
+              onChange={(e) => setNewTaskDesc(e.target.value)}
+              placeholder="描述任务内容，BizAgent 将据此自动创建群聊并分配工作..."
+              rows={4}
+              className="w-full text-sm bg-bg border border-border rounded-xl px-4 py-3 mb-6 outline-none focus:border-primary text-text resize-none placeholder:text-text-muted"
+            />
+
+            <div className="flex justify-center gap-3">
+              <button
+                onClick={() => { setTaskModalProjectId(null); setNewTaskName(''); setNewTaskDesc(''); }}
+                className="px-5 py-2.5 text-sm text-text-secondary border border-border rounded-xl hover:bg-bg transition-colors"
+              >
+                取消
+              </button>
+              <button
+                onClick={handleCreateTask}
+                disabled={!newTaskName.trim() || creatingTask}
+                className="px-5 py-2.5 text-sm bg-primary text-white rounded-xl hover:bg-primary-dark transition-colors disabled:opacity-50"
+              >
+                {creatingTask ? '创建中...' : 'AI 一键建群聊'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </aside>
   );
 }
@@ -248,7 +327,7 @@ export default function Sidebar({ activeView, activeProjectId, activeTaskId, onN
 
 function ProjectTreeItem({
   project, isExpanded, isProjectActive, activeTaskId, collapsed,
-  onToggleExpand, onNavigate, onDelete,
+  onToggleExpand, onNavigate, onDelete, onOpenTaskModal, taskLoadTrigger,
 }: {
   project: ProjectInfo;
   isExpanded: boolean;
@@ -258,11 +337,11 @@ function ProjectTreeItem({
   onToggleExpand: () => void;
   onNavigate: (view: string, projectId?: string, taskId?: string | null) => void;
   onDelete: (e: React.MouseEvent, projectId: string) => void;
+  onOpenTaskModal: () => void;
+  taskLoadTrigger: number;
 }) {
   const [tasks, setTasks] = useState<TaskInfo[]>([]);
   const [showMenu, setShowMenu] = useState(false);
-  const [addingTask, setAddingTask] = useState(false);
-  const [newTaskName, setNewTaskName] = useState('');
 
   const loadTasks = useCallback(() => {
     if (isExpanded) {
@@ -270,15 +349,7 @@ function ProjectTreeItem({
     }
   }, [isExpanded, project.id]);
 
-  useEffect(() => { loadTasks(); }, [loadTasks]);
-
-  const handleAddTask = async () => {
-    if (!newTaskName.trim()) return;
-    await createTask(project.id, newTaskName.trim());
-    setNewTaskName('');
-    setAddingTask(false);
-    loadTasks();
-  };
+  useEffect(() => { loadTasks(); }, [loadTasks, taskLoadTrigger]);
 
   const handleDeleteTask = async (e: React.MouseEvent, taskId: string) => {
     e.stopPropagation();
@@ -291,8 +362,8 @@ function ProjectTreeItem({
       <button
         onClick={() => onNavigate('project', project.id, null)}
         title={project.name}
-        className={`w-full flex justify-center px-2 py-2 rounded-lg transition-colors ${
-          isProjectActive ? 'bg-primary-light' : 'hover:bg-bg'
+        className={`w-full flex justify-center px-2 py-2.5 rounded-xl transition-all duration-200 ${
+          isProjectActive ? 'bg-primary-subtle' : 'hover:bg-primary/5'
         }`}
       >
         <div className={`w-2 h-2 rounded-full ${
@@ -303,14 +374,15 @@ function ProjectTreeItem({
     );
   }
 
-  const isMainChatActive = isProjectActive && activeTaskId === null;
+  const isMainChatActive = isProjectActive && activeTaskId === '_main';
+  const isDashboardActive = isProjectActive && activeTaskId === null;
 
   return (
     <div>
       {/* Project header row */}
       <div
-        className={`w-full flex items-center gap-1 px-1.5 py-1 rounded-lg text-left transition-colors group/proj cursor-pointer ${
-          isProjectActive ? 'bg-primary-light/50' : 'hover:bg-bg'
+        className={`w-full flex items-center gap-1 px-1.5 py-1 rounded-xl text-left transition-all duration-200 group/proj cursor-pointer ${
+          isDashboardActive ? 'bg-primary-subtle' : isProjectActive ? 'bg-primary-subtle/60' : 'hover:bg-primary/5'
         }`}
       >
         <button
@@ -330,14 +402,14 @@ function ProjectTreeItem({
 
         <span
           onClick={() => { if (!isExpanded) onToggleExpand(); onNavigate('project', project.id, null); }}
-          className={`flex-1 text-sm font-medium truncate ${isProjectActive ? 'text-primary-dark' : 'text-text'}`}
+          className={`flex-1 text-sm font-medium truncate ${isDashboardActive ? 'text-primary-dark' : isProjectActive ? 'text-primary-dark/70' : 'text-text'}`}
         >
           {project.name}
         </span>
 
         <div className="flex items-center gap-0.5 opacity-0 group-hover/proj:opacity-100 transition-opacity shrink-0">
           <button
-            onClick={(e) => { e.stopPropagation(); setAddingTask(true); }}
+            onClick={(e) => { e.stopPropagation(); onOpenTaskModal(); }}
             className="p-0.5 hover:bg-bg rounded transition-colors text-text-muted"
             title="新增任务"
           >
@@ -374,9 +446,9 @@ function ProjectTreeItem({
         <div className="ml-4 border-l border-border-light pl-2 space-y-0.5 mt-0.5">
           {/* Main chat */}
           <button
-            onClick={() => onNavigate('project', project.id, null)}
-            className={`w-full flex items-center gap-2 px-2 py-1 rounded-lg text-left text-sm transition-colors ${
-              isMainChatActive ? 'bg-primary-light text-primary-dark font-medium' : 'text-text-secondary hover:bg-bg hover:text-text'
+            onClick={() => onNavigate('project', project.id, '_main')}
+            className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-xl text-left text-sm transition-all duration-200 ${
+              isMainChatActive ? 'bg-primary-subtle/60 text-primary-dark font-medium' : 'text-text-secondary hover:bg-primary/5 hover:text-text'
             }`}
           >
             <MessageCircle className="w-3.5 h-3.5 shrink-0" />
@@ -390,8 +462,8 @@ function ProjectTreeItem({
               <div key={task.id} className="flex items-center group/task">
                 <button
                   onClick={() => onNavigate('project', project.id, task.id)}
-                  className={`flex-1 flex items-center gap-2 px-2 py-1 rounded-lg text-left text-sm transition-colors min-w-0 ${
-                    isTaskActive ? 'bg-primary-light text-primary-dark font-medium' : 'text-text-secondary hover:bg-bg hover:text-text'
+                  className={`flex-1 flex items-center gap-2 px-2.5 py-1.5 rounded-xl text-left text-sm transition-all duration-200 min-w-0 ${
+                    isTaskActive ? 'bg-primary-subtle/60 text-primary-dark font-medium' : 'text-text-secondary hover:bg-primary/5 hover:text-text'
                   }`}
                 >
                   <MessageCircle className="w-3.5 h-3.5 shrink-0" />
@@ -407,21 +479,6 @@ function ProjectTreeItem({
             );
           })}
 
-          {/* Inline add task */}
-          {addingTask ? (
-            <div className="flex items-center gap-1 px-1">
-              <input
-                value={newTaskName}
-                onChange={(e) => setNewTaskName(e.target.value)}
-                onKeyDown={(e) => { if (e.key === 'Enter') handleAddTask(); if (e.key === 'Escape') { setAddingTask(false); setNewTaskName(''); } }}
-                placeholder="任务名称"
-                autoFocus
-                className="flex-1 text-xs bg-bg border border-border rounded px-2 py-1 outline-none focus:border-primary text-text min-w-0"
-              />
-              <button onClick={handleAddTask} className="text-[10px] text-primary hover:text-primary-dark px-1 shrink-0">确定</button>
-              <button onClick={() => { setAddingTask(false); setNewTaskName(''); }} className="text-[10px] text-text-muted hover:text-text px-1 shrink-0">取消</button>
-            </div>
-          ) : null}
         </div>
       )}
     </div>

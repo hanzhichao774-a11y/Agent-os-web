@@ -1,15 +1,11 @@
-import { useState, useCallback, useEffect, useRef } from 'react';
-import Header from './components/Header';
+import { useState, useCallback, useEffect } from 'react';
 import Sidebar from './components/Sidebar';
 import Dashboard from './components/Dashboard';
-import GlobalChat from './components/GlobalChat';
+import BizAgent from './components/BizAgent';
 import ProjectChat from './components/ProjectChat';
 import AgentPage from './components/AgentPage';
-import AgentChat from './components/AgentChat';
 import SkillPage from './components/SkillPage';
-import SkillChat from './components/SkillChat';
 import RightPanel from './components/RightPanel';
-import WorkflowPage from './components/WorkflowPage';
 import { fetchProjects } from './services/api';
 import type { ProjectInfo } from './services/api';
 
@@ -29,13 +25,14 @@ export interface TeamTaskStep {
   tokens?: number;
 }
 
-type ViewType = 'home' | 'project' | 'agent' | 'skill' | 'workflow';
+type ViewType = 'home' | 'project' | 'agent' | 'skill';
 
 function App() {
   const [activeView, setActiveView] = useState<ViewType>('home');
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
-  const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
+  const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
   const [selectedSkillId, setSelectedSkillId] = useState<string | null>(null);
+  const [selectedAgentName, setSelectedAgentName] = useState<string | null>(null);
 
   const [teamAgents, setTeamAgents] = useState<TeamAgentStatus[]>([]);
   const [teamSteps, setTeamSteps] = useState<TeamTaskStep[]>([]);
@@ -50,13 +47,18 @@ function App() {
     loadProjects();
   }, [loadProjects]);
 
-  const handleNavigate = (view: string, projectId?: string) => {
+  const handleNavigate = (view: string, projectId?: string, taskId?: string | null) => {
     setActiveView(view as ViewType);
     if (projectId) {
       setActiveProjectId(projectId);
     }
-    if (view !== 'agent') setSelectedAgentId(null);
+    if (view === 'project') {
+      setActiveTaskId(taskId ?? null);
+    } else {
+      setActiveTaskId(null);
+    }
     if (view !== 'skill') setSelectedSkillId(null);
+    if (view !== 'agent') setSelectedAgentName(null);
   };
 
   const handleResetTeamState = useCallback(() => {
@@ -76,74 +78,32 @@ function App() {
   const isHomeView = activeView === 'home';
   const isAgentView = activeView === 'agent';
   const isSkillView = activeView === 'skill';
-  const isWorkflowView = activeView === 'workflow';
 
-  const hasAgentSelected = isAgentView && selectedAgentId;
-  const hasSkillSelected = isSkillView && selectedSkillId;
-
-  // Resizable splitter for home view
-  const [homeSplitPercent, setHomeSplitPercent] = useState(70);
-  const containerRef = useRef<HTMLDivElement>(null);
-  const dragging = useRef(false);
-
-  const handleMouseDown = useCallback(() => {
-    dragging.current = true;
-    document.body.style.cursor = 'col-resize';
-    document.body.style.userSelect = 'none';
-  }, []);
-
-  useEffect(() => {
-    const handleMouseMove = (e: MouseEvent) => {
-      if (!dragging.current || !containerRef.current) return;
-      const rect = containerRef.current.getBoundingClientRect();
-      const pct = ((e.clientX - rect.left) / rect.width) * 100;
-      setHomeSplitPercent(Math.min(85, Math.max(30, pct)));
-    };
-    const handleMouseUp = () => {
-      if (dragging.current) {
-        dragging.current = false;
-        document.body.style.cursor = '';
-        document.body.style.userSelect = '';
-      }
-    };
-    window.addEventListener('mousemove', handleMouseMove);
-    window.addEventListener('mouseup', handleMouseUp);
-    return () => {
-      window.removeEventListener('mousemove', handleMouseMove);
-      window.removeEventListener('mouseup', handleMouseUp);
-    };
-  }, []);
+  const showBizAgent = !isProjectView;
 
   return (
-    <div className="h-screen flex flex-col bg-bg">
-      <Header />
-      <div className="flex-1 flex overflow-hidden" ref={containerRef}>
-        <Sidebar
-          activeView={activeView}
-          activeProjectId={activeProjectId}
-          onNavigate={handleNavigate}
-          projects={projects}
-          onRefreshProjects={loadProjects}
-        />
+    <div className="h-screen flex bg-bg">
+      <Sidebar
+        activeView={activeView}
+        activeProjectId={activeProjectId}
+        activeTaskId={activeTaskId}
+        onNavigate={handleNavigate}
+        projects={projects}
+        onRefreshProjects={loadProjects}
+      />
 
+      {/* Center content area */}
+      <div className="flex-1 flex min-w-0 overflow-hidden">
         {isHomeView ? (
-          <>
-            <div className="min-w-0 overflow-hidden" style={{ width: `${homeSplitPercent}%` }}>
-              <Dashboard />
-            </div>
-            <div
-              onMouseDown={handleMouseDown}
-              className="w-1 shrink-0 bg-border hover:bg-primary cursor-col-resize transition-colors"
-            />
-            <div className="min-w-0 overflow-hidden flex-1">
-              <GlobalChat />
-            </div>
-          </>
+          <div className="flex-1 min-w-0 overflow-hidden">
+            <Dashboard />
+          </div>
         ) : isProjectView ? (
           <>
             <div className="flex-[3] min-w-0 overflow-hidden">
               <ProjectChat
                 projectId={activeProjectId!}
+                taskId={activeTaskId}
                 projectName={projects.find(p => p.id === activeProjectId)?.name || activeProjectId!}
                 projectDescription={projects.find(p => p.id === activeProjectId)?.description || ''}
                 onResetTeamState={handleResetTeamState}
@@ -161,43 +121,29 @@ function App() {
             </div>
           </>
         ) : isAgentView ? (
-          <>
-            <div className={`min-w-0 overflow-hidden ${hasAgentSelected ? 'flex-[3]' : 'flex-1'}`}>
-              <AgentPage
-                selectedAgentId={selectedAgentId}
-                onSelectAgent={setSelectedAgentId}
-              />
-            </div>
-            {hasAgentSelected && (
-              <div className="flex-1 min-w-0 overflow-hidden">
-                <AgentChat agentId={selectedAgentId!} onClose={() => setSelectedAgentId(null)} />
-              </div>
-            )}
-          </>
+          <div className="flex-1 min-w-0 overflow-hidden">
+            <AgentPage onSelectAgent={setSelectedAgentName} selectedAgentName={selectedAgentName} />
+          </div>
         ) : isSkillView ? (
-          <>
-            <div className={`min-w-0 overflow-hidden ${hasSkillSelected ? 'flex-[3]' : 'flex-1'}`}>
-              <SkillPage
-                selectedSkillId={selectedSkillId}
-                onSelectSkill={setSelectedSkillId}
-              />
-            </div>
-            {hasSkillSelected && (
-              <div className="flex-1 min-w-0 overflow-hidden">
-                <SkillChat skillId={selectedSkillId!} onClose={() => setSelectedSkillId(null)} />
-              </div>
-            )}
-          </>
-        ) : isWorkflowView ? (
-          <main className="flex-1 min-w-0 overflow-hidden">
-            <WorkflowPage />
-          </main>
+          <div className="flex-1 min-w-0 overflow-hidden">
+            <SkillPage
+              selectedSkillId={selectedSkillId}
+              onSelectSkill={setSelectedSkillId}
+            />
+          </div>
         ) : (
-          <main className="flex-1 min-w-0 overflow-hidden">
-            {activeView === 'project' && !activeProjectId && <Dashboard />}
-          </main>
+          <div className="flex-1 min-w-0 overflow-hidden">
+            <Dashboard />
+          </div>
         )}
       </div>
+
+      {/* BizAgent: fixed right panel, hidden in project view */}
+      {showBizAgent && (
+        <div className="w-80 shrink-0">
+          <BizAgent activeView={activeView} selectedAgentName={selectedAgentName} onClearAgent={() => setSelectedAgentName(null)} selectedSkillId={selectedSkillId} onClearSkill={() => setSelectedSkillId(null)} />
+        </div>
+      )}
     </div>
   );
 }

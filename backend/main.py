@@ -1,6 +1,7 @@
 import os
 import re
 import json
+import time
 import sqlite3
 import asyncio
 import importlib.util
@@ -62,6 +63,16 @@ def _init_projects_db():
             status TEXT NOT NULL DEFAULT 'active',
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS tasks (
+            id TEXT PRIMARY KEY,
+            project_id TEXT NOT NULL,
+            name TEXT NOT NULL,
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
         )
     """)
     conn.commit()
@@ -608,7 +619,7 @@ from agno.team.mode import TeamMode
 
 _teams: dict[str, Team] = {}
 
-TEAM_MEMBER_IDS = ["a1", "a2", "a3", "a4", "a5", "a6", "a7"]
+TEAM_MEMBER_IDS = ["a1", "a2", "a3"]
 
 _INTENT_CATEGORIES: dict[str, dict] = {
     "knowledge":     {"target": "a2", "name": "知识检索Agent", "desc": "从知识库检索已有文档内容"},
@@ -783,10 +794,60 @@ async def api_create_project(request: ProjectCreateRequest):
 @app.delete("/api/projects/{project_id}")
 async def api_delete_project(project_id: str):
     conn = _get_projects_conn()
+    conn.execute("DELETE FROM tasks WHERE project_id = ?", (project_id,))
     conn.execute("DELETE FROM projects WHERE id = ?", (project_id,))
     conn.commit()
     conn.close()
     return {"success": True}
+
+
+# ── Task CRUD ─────────────────────────────────────────────────────────────────
+
+@app.get("/api/projects/{project_id}/tasks")
+async def api_list_tasks(project_id: str):
+    conn = _get_projects_conn()
+    rows = conn.execute(
+        "SELECT * FROM tasks WHERE project_id = ? ORDER BY sort_order, created_at",
+        (project_id,),
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+class TaskCreateRequest(BaseModel):
+    name: str
+
+
+@app.post("/api/projects/{project_id}/tasks")
+async def api_create_task(project_id: str, request: TaskCreateRequest):
+    import uuid
+    task_id = f"t{uuid.uuid4().hex[:8]}"
+    now_str = datetime.now(timezone.utc).isoformat()
+    conn = _get_projects_conn()
+    max_order = conn.execute(
+        "SELECT COALESCE(MAX(sort_order), 0) FROM tasks WHERE project_id = ?",
+        (project_id,),
+    ).fetchone()[0]
+    conn.execute(
+        "INSERT INTO tasks (id, project_id, name, sort_order, created_at) VALUES (?,?,?,?,?)",
+        (task_id, project_id, request.name, max_order + 1, now_str),
+    )
+    conn.commit()
+    row = conn.execute("SELECT * FROM tasks WHERE id = ?", (task_id,)).fetchone()
+    conn.close()
+    return dict(row)
+
+
+@app.delete("/api/tasks/{task_id}")
+async def api_delete_task(task_id: str):
+    conn = _get_projects_conn()
+    conn.execute("DELETE FROM tasks WHERE id = ?", (task_id,))
+    conn.commit()
+    conn.close()
+    return {"success": True}
+
+
+_HIDDEN_AGENT_IDS = {"skill_engineer", "global", "a4", "a5", "a6", "a7"}
 
 
 @app.get("/api/agents")
@@ -804,7 +865,7 @@ async def api_list_agents():
             "instructions": v.get("instructions", []),
         }
         for k, v in AGENT_CONFIGS.items()
-        if k != "skill_engineer"
+        if k not in _HIDDEN_AGENT_IDS
     ]
 
 
@@ -1093,6 +1154,68 @@ async def api_run_skill(skill_id: str, request: SkillRunRequest):
         return {"success": True, "result": str(result)}
     except Exception as e:
         return {"success": False, "error": str(e)}
+
+
+class CreateAgentRequest(BaseModel):
+    name: str
+    avatar: str = "🤖"
+    description: str = ""
+    instructions: list[str] | None = None
+    skill_ids: list[str] | None = None
+    builtin_tools: list[str] | None = None
+    join_team: bool = False
+
+
+@app.post("/api/agents")
+async def api_create_agent(req: CreateAgentRequest):
+    agent_id = f"custom_{int(time.time() * 1000)}"
+    config = {
+        "name": req.name,
+        "avatar": req.avatar,
+        "description": req.description,
+        "capabilities": [],
+        "builtin_tools": req.builtin_tools or [],
+        "instructions": req.instructions or [
+            f"你是{req.name}，一个智能数字员工。",
+            "根据用户的指令完成任务。",
+            "始终使用中文回答。",
+        ],
+    }
+    AGENT_CONFIGS[agent_id] = config
+    if req.skill_ids:
+        _agent_tools[agent_id] = req.skill_ids
+    if req.join_team:
+        TEAM_MEMBER_IDS.append(agent_id)
+        _teams.clear()
+    return {
+        "success": True,
+        "agent": {
+            "id": agent_id,
+            "name": config["name"],
+            "avatar": config["avatar"],
+            "description": config["description"],
+            "capabilities": config["capabilities"],
+            "builtin_tools": config["builtin_tools"],
+            "custom_tools": _agent_tools.get(agent_id, []),
+            "has_knowledge": config.get("has_knowledge", False),
+            "instructions": config["instructions"],
+        },
+    }
+
+
+@app.delete("/api/agents/{agent_id}")
+async def api_delete_agent(agent_id: str):
+    if not agent_id.startswith("custom_"):
+        return {"success": False, "error": "内置 Agent 不允许删除"}
+    if agent_id not in AGENT_CONFIGS:
+        return {"success": False, "error": f"Agent [{agent_id}] 不存在"}
+    AGENT_CONFIGS.pop(agent_id, None)
+    _agent_tools.pop(agent_id, None)
+    _agents.pop(agent_id, None)
+    if agent_id in TEAM_MEMBER_IDS:
+        TEAM_MEMBER_IDS.remove(agent_id)
+    _teams.clear()
+    return {"success": True, "agent_id": agent_id}
 
 
 @app.put("/api/agents/{agent_id}/tools")

@@ -1,13 +1,14 @@
 import { useState, useRef, useEffect, useMemo } from 'react';
-import { Send, Loader2, Users, UserCheck, ArrowRight, Paperclip } from 'lucide-react';
+import { Send, Loader2, Paperclip, Plus, FolderOpen } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { streamTeamChat, uploadDocument } from '../services/api';
-import type { TeamChatEvent } from '../services/api';
+import { streamTeamChat, uploadDocument, fetchTasks } from '../services/api';
+import type { TeamChatEvent, TaskInfo } from '../services/api';
 import type { TeamAgentStatus, TeamTaskStep } from '../App';
 
 interface ProjectChatProps {
   projectId: string;
+  taskId: string | null;
   projectName: string;
   projectDescription: string;
   onResetTeamState: () => void;
@@ -72,12 +73,24 @@ function MarkdownContent({ content }: { content: string }) {
   );
 }
 
-export default function ProjectChat({ projectId, projectName, projectDescription, onResetTeamState, onUpdateTeamAgents, onUpdateTeamSteps }: ProjectChatProps) {
+const MEMBER_COLORS = [
+  { bg: 'bg-emerald-500', text: 'text-white' },
+  { bg: 'bg-blue-500', text: 'text-white' },
+  { bg: 'bg-amber-500', text: 'text-white' },
+  { bg: 'bg-rose-500', text: 'text-white' },
+  { bg: 'bg-violet-500', text: 'text-white' },
+];
+
+export default function ProjectChat({ projectId, taskId, projectName, projectDescription, onResetTeamState, onUpdateTeamAgents, onUpdateTeamSteps }: ProjectChatProps) {
   const [messages, setMessages] = useState<ChatMsg[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
-  const sessionId = useRef(`team_${projectId}_${Date.now()}`);
+  const [taskName, setTaskName] = useState<string | null>(null);
+  const sessionId = useRef(`team_${projectId}_task_${taskId || 'main'}`);
+  const msgCache = useRef(new Map<string, ChatMsg[]>());
+  const messagesRef = useRef(messages);
+  messagesRef.current = messages;
   const bottomRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const memberMsgIds = useRef(new Map<string, string>());
@@ -87,16 +100,37 @@ export default function ProjectChat({ projectId, projectName, projectDescription
   }, [messages]);
 
   useEffect(() => {
-    sessionId.current = `team_${projectId}_${Date.now()}`;
-    setMessages([
-      {
-        id: 'sys',
-        role: 'system',
-        content: `已进入「${projectName}」项目群聊。Team Leader 将协调 7 个专家 Agent 协同工作。\n\n你可以提出任何需求，Leader 会自动分配给最合适的 Agent 处理。`,
-        timestamp: now(),
-      },
-    ]);
-  }, [projectId, projectName]);
+    const newSessionId = `team_${projectId}_task_${taskId || 'main'}`;
+
+    if (sessionId.current !== newSessionId) {
+      msgCache.current.set(sessionId.current, messagesRef.current);
+    }
+
+    sessionId.current = newSessionId;
+
+    if (taskId) {
+      fetchTasks(projectId).then((tasks: TaskInfo[]) => {
+        const t = tasks.find(t => t.id === taskId);
+        setTaskName(t?.name || null);
+      });
+    } else {
+      setTaskName(null);
+    }
+
+    const cached = msgCache.current.get(newSessionId);
+    if (cached && cached.length > 0) {
+      setMessages(cached);
+    } else {
+      setMessages([
+        {
+          id: `sys_${newSessionId}`,
+          role: 'system',
+          content: `群主 BizAgent 已创建项目：${projectName}`,
+          timestamp: now(),
+        },
+      ]);
+    }
+  }, [projectId, projectName, taskId]);
 
   function now() {
     return new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
@@ -258,7 +292,7 @@ export default function ProjectChat({ projectId, projectName, projectDescription
     try {
       const result = await uploadDocument(file);
       const msg = result.success
-        ? `已上传 ${result.doc_name}，共 ${result.chunks} 个段落已入库。知识检索 Agent 可检索此文档。`
+        ? `已上传 ${result.doc_name}，共 ${result.chunks} 个段落已入库。`
         : `上传失败：${result.error || '未知错误'}`;
       setMessages(prev => [...prev, { id: `upload_done_${Date.now()}`, role: 'system', content: msg, timestamp: now() }]);
     } catch {
@@ -268,129 +302,172 @@ export default function ProjectChat({ projectId, projectName, projectDescription
     }
   };
 
+  const chatTitle = taskId ? (taskName || '任务对话') : '主对话';
+
+  const getAgentInitial = (name?: string) => {
+    if (!name) return '?';
+    const clean = name.replace(/^\S+\s/, '');
+    return clean.charAt(0);
+  };
+
   return (
     <div className="h-full flex flex-col bg-bg">
-      <div className="h-14 bg-surface border-b border-border flex items-center justify-between px-4 shrink-0">
+      {/* Header */}
+      <div className="h-14 bg-surface border-b border-border flex items-center justify-between px-5 shrink-0">
+        <h2 className="font-semibold text-text text-base">{chatTitle}</h2>
         <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-full bg-primary-light flex items-center justify-center">
-            <Users className="w-4 h-4 text-primary-dark" />
+          <div className="flex -space-x-1.5">
+            {['S', 'B', 'A', 'K'].map((letter, i) => (
+              <div
+                key={letter}
+                className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold text-white border-2 border-surface ${MEMBER_COLORS[i].bg}`}
+              >
+                {letter}
+              </div>
+            ))}
           </div>
-          <div>
-            <h2 className="font-semibold text-text text-sm">{projectName}</h2>
-            <p className="text-xs text-text-muted">{projectDescription} · Team Route 模式</p>
-          </div>
-        </div>
-        <div className="flex items-center gap-1 text-xs text-text-muted">
-          <span className="w-2 h-2 rounded-full bg-success" />
-          7 Agent 就绪
+          <span className="text-sm text-text-muted">5 members</span>
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-4 space-y-3">
+      {/* Messages */}
+      <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
+        {/* Date separator */}
+        <div className="flex justify-center">
+          <span className="text-xs text-text-muted bg-bg px-3 py-1 rounded-full">Today</span>
+        </div>
+
         {messages.map((msg) => {
           if (msg.role === 'delegation') {
             return (
-              <div key={msg.id} className="flex items-start gap-2 px-4 py-1.5">
-                <ArrowRight className="w-3.5 h-3.5 text-amber-500 shrink-0 mt-0.5" />
-                <span className="text-xs text-text-muted">
+              <div key={msg.id} className="flex justify-center">
+                <span className="text-xs text-text-muted italic">
                   <MarkdownContent content={msg.content} />
                 </span>
               </div>
             );
           }
 
-          const avatarBg =
-            msg.role === 'leader' ? 'bg-amber-100 dark:bg-amber-900/20' :
-            msg.role === 'member' ? 'bg-indigo-100 dark:bg-indigo-900/20' :
-            msg.role === 'human' ? 'bg-primary/15' :
-            'bg-bg border border-border';
-
-          const avatar =
-            msg.role === 'leader' ? '👑' :
-            msg.role === 'human' ? '👤' :
-            msg.role === 'system' ? '🔔' :
-            (msg.agentName?.match(/^(\S+)/)?.[1] || '🤖');
-
-          const labelColor =
-            msg.role === 'leader' ? 'text-amber-700 dark:text-amber-400' :
-            msg.role === 'member' ? 'text-indigo-700 dark:text-indigo-400' :
-            msg.role === 'human' ? 'text-primary-dark' :
-            'text-text-muted';
-
-          const label =
-            msg.role === 'leader' ? 'Team Leader' :
-            msg.role === 'member' ? (msg.agentName?.replace(/^\S+\s/, '') || '成员') :
-            msg.role === 'human' ? '你' : '系统';
-
-          const bubbleBg =
-            msg.role === 'leader' ? 'bg-amber-50 dark:bg-amber-900/10 border-amber-200 dark:border-amber-800/30' :
-            msg.role === 'member' ? 'bg-indigo-50 dark:bg-indigo-900/10 border-indigo-200 dark:border-indigo-800/30' :
-            msg.role === 'human' ? 'bg-primary-light border-primary/20' :
-            'bg-bg border-border';
-
-          return (
-            <div key={msg.id} className={`flex gap-3 ${msg.role === 'human' ? 'flex-row-reverse' : ''}`}>
-              <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm shrink-0 ${avatarBg}`}>
-                {avatar}
-              </div>
-              <div className="max-w-[75%] min-w-0">
-                <div className="flex items-center gap-2 mb-1">
-                  <span className={`text-xs font-semibold ${labelColor}`}>{label}</span>
-                  {msg.role === 'member' && (
-                    <span className="inline-flex items-center gap-0.5 text-[10px] bg-indigo-100 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 px-1.5 py-0.5 rounded-full">
-                      <UserCheck className="w-2.5 h-2.5" />
-                      成员响应
-                    </span>
-                  )}
-                  <span className="text-xs text-text-muted">{msg.timestamp}</span>
+          if (msg.role === 'system') {
+            return (
+              <div key={msg.id} className="flex gap-3">
+                <div className="w-8 h-8 rounded-full bg-gray-200 dark:bg-gray-700 flex items-center justify-center shrink-0 text-xs font-bold text-gray-500 dark:text-gray-400">
+                  系
                 </div>
-                <div className={`rounded-xl px-4 py-2.5 text-sm border ${bubbleBg}`}>
-                  <div className="text-text prose prose-sm max-w-none dark:prose-invert">
-                    {msg.role === 'human' ? (
-                      <div className="whitespace-pre-wrap">{msg.content}</div>
-                    ) : msg.content === '' && msg.role === 'member' ? (
-                      <div className="flex items-center gap-2 text-text-muted text-xs">
-                        <Loader2 className="w-3 h-3 animate-spin" />
-                        正在思考...
-                      </div>
-                    ) : (
-                      <MarkdownContent content={msg.content} />
-                    )}
+                <div>
+                  <div className="text-xs text-text-muted mb-1">系统</div>
+                  <div className="bg-surface border border-border rounded-xl rounded-tl-sm px-4 py-2.5 text-sm text-text max-w-md">
+                    <MarkdownContent content={msg.content} />
                   </div>
                 </div>
               </div>
-            </div>
-          );
+            );
+          }
+
+          if (msg.role === 'human') {
+            return (
+              <div key={msg.id} className="flex gap-3 flex-row-reverse">
+                <div className="w-8 h-8 rounded-full bg-primary flex items-center justify-center shrink-0 text-xs font-bold text-white">
+                  S
+                </div>
+                <div className="flex flex-col items-end">
+                  <div className="bg-primary text-white rounded-xl rounded-tr-sm px-4 py-2.5 text-sm max-w-md">
+                    <div className="whitespace-pre-wrap">{msg.content}</div>
+                  </div>
+                  <div className="flex items-center gap-2 mt-1 text-xs text-text-muted">
+                    <span>{msg.timestamp}</span>
+                  </div>
+                </div>
+              </div>
+            );
+          }
+
+          if (msg.role === 'leader') {
+            return (
+              <div key={msg.id} className="flex gap-3">
+                <div className="w-8 h-8 rounded-full bg-amber-500 flex items-center justify-center shrink-0">
+                  <span className="text-xs font-bold text-white">B</span>
+                </div>
+                <div className="max-w-[75%] min-w-0">
+                  <div className="text-xs text-text-muted mb-1">BizAgent</div>
+                  <div className="bg-surface border border-border rounded-xl rounded-tl-sm px-4 py-2.5 text-sm">
+                    <div className="text-text prose prose-sm max-w-none dark:prose-invert">
+                      {msg.content === '' ? (
+                        <div className="flex items-center gap-2 text-text-muted text-xs">
+                          <Loader2 className="w-3 h-3 animate-spin" />
+                          正在汇总...
+                        </div>
+                      ) : (
+                        <MarkdownContent content={msg.content} />
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          }
+
+          if (msg.role === 'member') {
+            const initial = getAgentInitial(msg.agentName);
+            const agentLabel = msg.agentName?.replace(/^\S+\s/, '') || '成员';
+
+            return (
+              <div key={msg.id} className="flex gap-3">
+                <div className="w-8 h-8 rounded-full bg-indigo-500 flex items-center justify-center shrink-0">
+                  <span className="text-xs font-bold text-white">{initial}</span>
+                </div>
+                <div className="max-w-[75%] min-w-0">
+                  <div className="text-xs text-text-muted mb-1">{agentLabel}</div>
+                  <div className="bg-surface border border-border rounded-xl rounded-tl-sm px-4 py-2.5 text-sm">
+                    <div className="text-text prose prose-sm max-w-none dark:prose-invert">
+                      {msg.content === '' ? (
+                        <div className="flex items-center gap-2 text-text-muted text-xs">
+                          <Loader2 className="w-3 h-3 animate-spin" />
+                          正在执行数据提取...
+                        </div>
+                      ) : (
+                        <MarkdownContent content={msg.content} />
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          }
+
+          return null;
         })}
-        {isLoading && !memberMsgIds.current.size && messages[messages.length - 1]?.content === '' && (
-          <div className="flex items-center gap-2 text-xs text-text-muted pl-11">
-            <Loader2 className="w-3 h-3 animate-spin" />
-            Team Leader 正在分析问题并选择 Agent...
+
+        {isLoading && !memberMsgIds.current.size && (
+          <div className="flex justify-center">
+            <div className="flex items-center gap-2 text-xs text-text-muted bg-bg px-3 py-1.5 rounded-full">
+              <Loader2 className="w-3 h-3 animate-spin" />
+              Team Leader 正在分析并分配任务...
+            </div>
           </div>
         )}
         <div ref={bottomRef} />
       </div>
 
-      <div className="bg-surface border-t border-border p-3 shrink-0">
-        <div className="flex items-end gap-2 bg-bg border border-border rounded-xl px-3 py-2 focus-within:border-primary transition-colors">
+      {/* Input area */}
+      <div className="bg-surface border-t border-border px-5 py-3 shrink-0">
+        <div className="flex items-center gap-2 bg-bg border border-border rounded-xl px-3 py-2.5 focus-within:border-primary transition-colors">
           <button
             onClick={() => fileInputRef.current?.click()}
             disabled={isUploading}
-            className="p-1.5 hover:bg-border-light rounded-lg transition-colors shrink-0"
-            title="上传文档到知识库"
+            className="p-1 hover:bg-border-light rounded-lg transition-colors shrink-0"
+            title="上传文档"
           >
             {isUploading ? <Loader2 className="w-4 h-4 text-text-muted animate-spin" /> : <Paperclip className="w-4 h-4 text-text-muted" />}
           </button>
           <input ref={fileInputRef} type="file" accept=".txt,.md,.markdown,.text,.pdf" onChange={handleFileUpload} className="hidden" />
-          <textarea
+          <input
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
-            placeholder="输入需求，Team Leader 会协调多个 Agent 协同完成..."
-            rows={1}
+            placeholder="Message... (@ to mention or reference files)"
             disabled={isLoading}
-            className="flex-1 bg-transparent resize-none outline-none text-sm text-text max-h-32 py-1.5 disabled:opacity-50"
-            style={{ minHeight: '24px' }}
+            className="flex-1 bg-transparent outline-none text-sm text-text disabled:opacity-50"
           />
           <button
             onClick={handleSend}
@@ -400,8 +477,16 @@ export default function ProjectChat({ projectId, projectName, projectDescription
             {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
           </button>
         </div>
-        <div className="text-xs text-text-muted mt-1.5 px-1">
-          按 Enter 发送 · Team 将自动分配任务给最合适的 Agent
+        <div className="flex items-center gap-3 mt-2 px-1">
+          <button className="flex items-center gap-1 text-xs text-text-muted hover:text-text transition-colors">
+            <Plus className="w-3.5 h-3.5" />
+          </button>
+          <button className="flex items-center gap-1.5 text-xs text-text-muted hover:text-text transition-colors">
+            <FolderOpen className="w-3.5 h-3.5" />
+            <span>project</span>
+          </button>
+          <div className="flex-1" />
+          <span className="text-xs text-text-muted">Default Permission</span>
         </div>
       </div>
     </div>

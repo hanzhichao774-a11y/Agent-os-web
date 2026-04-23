@@ -67,6 +67,14 @@ export interface ProjectInfo {
   updated_at: string;
 }
 
+export interface TaskInfo {
+  id: string;
+  project_id: string;
+  name: string;
+  sort_order: number;
+  created_at: string;
+}
+
 /**
  * 向指定 Agent 发送消息，通过 SSE 流式接收响应。
  */
@@ -194,6 +202,29 @@ export async function deleteProject(id: string): Promise<void> {
   await fetch(`${API_BASE}/api/projects/${id}`, { method: 'DELETE' });
 }
 
+/** 获取项目下的子任务列表 */
+export async function fetchTasks(projectId: string): Promise<TaskInfo[]> {
+  const res = await fetch(`${API_BASE}/api/projects/${projectId}/tasks`);
+  if (!res.ok) return [];
+  return res.json();
+}
+
+/** 创建子任务 */
+export async function createTask(projectId: string, name: string): Promise<TaskInfo> {
+  const res = await fetch(`${API_BASE}/api/projects/${projectId}/tasks`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name }),
+  });
+  return res.json();
+}
+
+/** 删除子任务 */
+export async function deleteTask(taskId: string): Promise<{ success: boolean }> {
+  const res = await fetch(`${API_BASE}/api/tasks/${taskId}`, { method: 'DELETE' });
+  return res.json();
+}
+
 /** 获取后端技能列表 */
 export async function fetchSkills(): Promise<SkillInfo[]> {
   const res = await fetch(`${API_BASE}/api/skills`);
@@ -234,6 +265,29 @@ export async function setAgentTools(agentId: string, skillIds: string[]): Promis
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ skill_ids: skillIds }),
   });
+  return res.json();
+}
+
+/** 创建新 Agent（数字员工） */
+export async function createAgent(data: {
+  name: string;
+  avatar?: string;
+  description?: string;
+  instructions?: string[];
+  skill_ids?: string[];
+  join_team?: boolean;
+}): Promise<{ success: boolean; agent?: AgentInfo; error?: string }> {
+  const res = await fetch(`${API_BASE}/api/agents`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+  return res.json();
+}
+
+/** 删除自定义 Agent */
+export async function deleteAgent(agentId: string): Promise<{ success: boolean; error?: string }> {
+  const res = await fetch(`${API_BASE}/api/agents/${agentId}`, { method: 'DELETE' });
   return res.json();
 }
 

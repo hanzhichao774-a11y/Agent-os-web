@@ -548,3 +548,47 @@ export async function testRerankerConnection(settings: RerankerSettings): Promis
   });
   return res.json();
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 会话历史管理
+// ═══════════════════════════════════════════════════════════════════════════════
+
+export interface SessionSummary {
+  session_id: string;
+  session_type: string;
+  agent_id: string | null;
+  team_id: string | null;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface HistoryMessage {
+  id: string;
+  role: 'user' | 'assistant' | 'system';
+  content: string;
+  agent_name?: string;
+  timestamp: number;
+}
+
+/** 获取会话列表（可按 agent_id 或 team_id 过滤） */
+export async function fetchSessions(params?: {
+  agent_id?: string;
+  team_id?: string;
+  limit?: number;
+}): Promise<SessionSummary[]> {
+  const query = new URLSearchParams();
+  if (params?.agent_id) query.set('agent_id', params.agent_id);
+  if (params?.team_id) query.set('team_id', params.team_id);
+  if (params?.limit) query.set('limit', String(params.limit));
+  const qs = query.toString();
+  const res = await fetch(`${API_BASE}/api/sessions${qs ? '?' + qs : ''}`);
+  if (!res.ok) return [];
+  return res.json();
+}
+
+/** 获取单个会话的聊天消息历史 */
+export async function fetchSessionMessages(sessionId: string): Promise<HistoryMessage[]> {
+  const res = await fetch(`${API_BASE}/api/sessions/${encodeURIComponent(sessionId)}/messages`);
+  if (!res.ok) return [];
+  return res.json();
+}

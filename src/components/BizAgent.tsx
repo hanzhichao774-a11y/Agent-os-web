@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useMemo } from 'react';
 import { Send, Loader2, Sparkles, AtSign, X, Bot, Wrench } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { streamAgentChat, streamSkillChat, fetchSkills } from '../services/api';
+import { streamAgentChat, streamSkillChat, fetchSkills, fetchSessionMessages } from '../services/api';
 import type { SkillInfo } from '../services/api';
 
 interface ChatMsg {
@@ -128,7 +128,7 @@ export default function BizAgent({ activeView, selectedAgentName, onClearAgent, 
   const [messages, setMessages] = useState<ChatMsg[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const sessionId = useRef(`bizagent_${Date.now()}`);
+  const sessionId = useRef('bizagent_main');
   const skillSessionId = useRef(`skill_new_${Date.now()}`);
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -177,6 +177,22 @@ export default function BizAgent({ activeView, selectedAgentName, onClearAgent, 
       setTimeout(() => inputRef.current?.focus(), 50);
     }
   }, [selectedAgentName]);
+
+  useEffect(() => {
+    fetchSessionMessages(sessionId.current).then(history => {
+      if (history.length > 0) {
+        const restored: ChatMsg[] = history.map(m => ({
+          id: m.id,
+          role: m.role === 'user' ? 'human' : m.role as ChatMsg['role'],
+          content: m.content,
+          timestamp: m.timestamp
+            ? new Date(m.timestamp * 1000).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+            : '',
+        }));
+        setMessages(restored);
+      }
+    });
+  }, []);
 
   function now() {
     return new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });

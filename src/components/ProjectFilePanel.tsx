@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { FileText, Upload, Loader2, Image, FileSpreadsheet, File, Download } from 'lucide-react';
+import { FileText, Upload, Loader2, Image, FileSpreadsheet, File, Download, ExternalLink } from 'lucide-react';
 import { fetchWorkspaceFiles, uploadDocument, getWorkspaceFileUrl } from '../services/api';
 import type { WorkspaceFile } from '../services/api';
 
@@ -19,6 +19,35 @@ function getFileIcon(name: string) {
   if (['xlsx', 'xls', 'csv'].includes(ext)) return FileSpreadsheet;
   if (['pdf', 'doc', 'docx', 'txt', 'md'].includes(ext)) return FileText;
   return File;
+}
+
+function getFileTypeLabel(name: string): string {
+  const ext = name.split('.').pop()?.toUpperCase() || '';
+  return ext;
+}
+
+function isPreviewable(name: string): boolean {
+  const ext = name.split('.').pop()?.toLowerCase() || '';
+  return ['pdf', 'png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'txt', 'md', 'json', 'csv'].includes(ext);
+}
+
+async function downloadFile(filename: string) {
+  const url = getWorkspaceFileUrl(filename);
+  try {
+    const resp = await fetch(url);
+    if (!resp.ok) return;
+    const blob = await resp.blob();
+    const blobUrl = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = blobUrl;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(blobUrl);
+  } catch {
+    window.open(url, '_blank');
+  }
 }
 
 const MOCK_OUTPUTS = [
@@ -87,12 +116,10 @@ export default function ProjectFilePanel({ projectId }: ProjectFilePanelProps) {
             )}
             {files.map(f => {
               const Icon = getFileIcon(f.name);
+              const previewable = isPreviewable(f.name);
               return (
-                <a
+                <div
                   key={f.name}
-                  href={getWorkspaceFileUrl(f.name)}
-                  target="_blank"
-                  rel="noopener noreferrer"
                   className="flex items-center gap-2.5 px-2.5 py-2 rounded-lg hover:bg-bg transition-colors group"
                 >
                   <div className="w-8 h-8 bg-bg border border-border rounded-lg flex items-center justify-center shrink-0">
@@ -100,10 +127,30 @@ export default function ProjectFilePanel({ projectId }: ProjectFilePanelProps) {
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className="text-sm text-text font-medium truncate">{f.name}</p>
-                    <p className="text-[10px] text-text-muted">{formatFileSize(f.size)}</p>
+                    <p className="text-[10px] text-text-muted">
+                      <span className="inline-block bg-bg-muted px-1 rounded mr-1">{getFileTypeLabel(f.name)}</span>
+                      {formatFileSize(f.size)}
+                    </p>
                   </div>
-                  <Download className="w-3.5 h-3.5 text-text-muted opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />
-                </a>
+                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                    {previewable && (
+                      <button
+                        onClick={() => window.open(getWorkspaceFileUrl(f.name), '_blank')}
+                        className="p-1 rounded hover:bg-border transition-colors"
+                        title="预览"
+                      >
+                        <ExternalLink className="w-3.5 h-3.5 text-text-muted" />
+                      </button>
+                    )}
+                    <button
+                      onClick={() => downloadFile(f.name)}
+                      className="p-1 rounded hover:bg-border transition-colors"
+                      title="下载"
+                    >
+                      <Download className="w-3.5 h-3.5 text-text-muted" />
+                    </button>
+                  </div>
+                </div>
               );
             })}
           </div>

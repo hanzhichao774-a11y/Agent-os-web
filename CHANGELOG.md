@@ -4,6 +4,42 @@
 
 ---
 
+## [2026-04-27] 后端模块化拆分 + 内置工具 + 图表/文件交互优化
+
+### 重构
+- **main.py 模块化拆分**：将原 ~2800 行的单体 `main.py` 拆分为 12 个核心模块 + 9 个路由文件
+  - 核心模块：`config.py`、`schemas.py`、`utils.py`、`database.py`、`llm.py`、`embeddings.py`、`knowledge.py`、`skill_manager.py`、`agents.py`、`teams.py`、`tools.py`
+  - 路由包：`routes/settings.py`、`routes/sessions.py`、`routes/chat.py`、`routes/skills.py`、`routes/agents_api.py`、`routes/projects.py`、`routes/knowledge_api.py`、`routes/stats.py`、`routes/workflows.py`
+  - `main.py` 精简至 ~30 行，仅负责 FastAPI app 创建和路由注册
+
+### 新增
+- **B 端数据处理内置工具**（`backend/builtin_tools/` 包）：
+  - `pdf_generator.py`：基于 ReportLab 的 PDF 报告生成，支持 Markdown 转换、中文字体、emoji 自动清理
+  - `chart_generator.py`：基于 Matplotlib 的图表生成（柱状图/折线图/饼图/散点图/水平柱状图），支持多系列数据
+  - `excel_generator.py`：基于 XlsxWriter 的 Excel 报表导出
+  - `image_processor.py`：基于 Pillow 的图片处理（缩放/裁剪/水印/格式转换等）
+  - `http_client.py`：基于 httpx 的通用 HTTP 请求工具
+- **BizAgent 新增管理工具**：
+  - `_global_list_tasks(project_id)`：查询指定项目下的子任务列表
+  - `_global_list_workspace_files()`：列出工作区所有产出文件
+- **聊天记录持久化**：新增 `chat_messages` 表，Team/Agent 对话刷新后不再丢失
+- **双模式技能结构**：支持单 `.py` 文件技能和目录型技能（含 `main.py` 入口）
+
+### 优化
+- **Team 路由优先级**：文件生成类请求（图表/PDF/Excel）提升为最高优先级路由到 a1（数据分析Agent），解决跨上下文路由错误
+- **Agent 输出格式规范**：a1/a3/global 的 instructions 要求输出 `已生成柱状图：标题` + `文件名称：xxx.ext` 格式，便于前端渲染下载卡片
+- **图谱页 BizAgent 对话**：从 Team 路由改为直接对话 BizAgent（global agent），注入当前项目上下文，正确回答项目维度问题
+- **右侧文件面板数据源修正**："上传文件"改为展示知识库文档，"产出文件"改为展示 workspace 生成文件
+
+### 修复
+- **OutputCards 正则兼容**：修复前端正则无法匹配 Markdown 格式（`**文件名称**`、`` `文件名.ext` ``）导致下载卡片不渲染的问题
+- **OutputCards 点击功能**：为文件卡片添加预览（PNG/PDF 等新窗口打开）和下载（Blob 下载）功能
+- **PDF 特殊字符清理**：自动去除 emoji 和不支持的 Unicode 字符，避免 STSong 字体渲染失败
+- **中文文件名**：Agent instructions 要求使用中文命名产出文件
+- **workspace 文件下载**：区分 inline（可预览类型）和 attachment（强制下载），修复 PDF/图片无法在浏览器打开的问题
+
+---
+
 ## [2026-04-27] Embedding / Reranker 配置管理
 
 ### 新增

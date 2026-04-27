@@ -2,8 +2,8 @@ import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { Send, Loader2, X, Plus, MessageCircle } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { fetchAgents, fetchSkills, fetchWorkspaceFiles, streamTeamChat } from '../services/api';
-import type { AgentInfo, SkillInfo, WorkspaceFile, TeamChatEvent } from '../services/api';
+import { fetchAgents, fetchSkills, fetchWorkspaceFiles, streamAgentChat, fetchSessionMessages } from '../services/api';
+import type { AgentInfo, SkillInfo, WorkspaceFile, ChatChunk } from '../services/api';
 
 interface ProjectDashboardProps {
   projectId: string;
@@ -157,7 +157,7 @@ export default function ProjectDashboard({ projectId, projectName, projectDescri
   const draggedNodeRef = useRef<GraphNode | null>(null);
   const hoveredNodeRef = useRef<GraphNode | null>(null);
   const chatDragRef = useRef<{ startX: number; startY: number; posX: number; posY: number } | null>(null);
-  const sessionId = useRef(`project_dash_${projectId}_${Date.now()}`);
+  const sessionId = useRef(`bizagent_dash_${projectId}`);
   const chatBottomRef = useRef<HTMLDivElement>(null);
   const chatRectRef = useRef<{ x: number; y: number; w: number; h: number; active: boolean }>({ x: 0, y: 0, w: 0, h: 0, active: false });
 
@@ -166,8 +166,20 @@ export default function ProjectDashboard({ projectId, projectName, projectDescri
   }, [chatMessages]);
 
   useEffect(() => {
-    sessionId.current = `project_dash_${projectId}_${Date.now()}`;
-    setChatMessages([]);
+    sessionId.current = `bizagent_dash_${projectId}`;
+    const backendSessionId = sessionId.current;
+    fetchSessionMessages(backendSessionId).then(history => {
+      if (history.length > 0) {
+        const restored: ChatMsg[] = history.map(m => ({
+          id: m.id,
+          role: m.role === 'user' ? 'human' : (m.role as ChatMsg['role']),
+          content: m.content,
+        }));
+        setChatMessages(restored);
+      } else {
+        setChatMessages([]);
+      }
+    });
   }, [projectId]);
 
   // Build graph data from API
@@ -533,14 +545,17 @@ export default function ProjectDashboard({ projectId, projectName, projectDescri
     setChatInput('');
     setChatLoading(true);
 
+    const contextPrefix = `[当前项目上下文] 用户正在查看项目「${projectName}」(ID: ${projectId})。当用户说"这个项目"时，指的就是这个项目。\n\n用户问题：`;
+    const messageWithContext = contextPrefix + userMsg.content;
+
     const assistantId = `a_${Date.now()}`;
     setChatMessages(prev => [...prev, { id: assistantId, role: 'assistant', content: '' }]);
 
     try {
-      await streamTeamChat(projectId, userMsg.content, sessionId.current, (event: TeamChatEvent) => {
-        if (event.type === 'leader_content' || event.type === 'member_streaming' || event.type === 'member_response') {
+      await streamAgentChat('global', messageWithContext, sessionId.current, (chunk: ChatChunk) => {
+        if (chunk.content) {
           setChatMessages(prev => prev.map(m =>
-            m.id === assistantId ? { ...m, content: m.content + (event.content || '') } : m
+            m.id === assistantId ? { ...m, content: m.content + chunk.content } : m
           ));
         }
       });

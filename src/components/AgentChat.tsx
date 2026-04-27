@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useMemo } from 'react';
 import { Send, Paperclip, X, Settings, Loader2, Wrench, Plus } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { streamAgentChat, uploadDocument, fetchAgents, fetchSkills, setAgentTools } from '../services/api';
+import { streamAgentChat, uploadDocument, fetchAgents, fetchSkills, setAgentTools, fetchSessionMessages } from '../services/api';
 import type { AgentInfo, SkillInfo } from '../services/api';
 
 interface AgentChatProps {
@@ -70,7 +70,7 @@ export default function AgentChat({ agentId, onClose }: AgentChatProps) {
   const [showConfig, setShowConfig] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
-  const sessionId = useRef(`${agentId}_${Date.now()}`);
+  const sessionId = useRef(`agent_${agentId}_main`);
   const bottomRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -79,15 +79,29 @@ export default function AgentChat({ agentId, onClose }: AgentChatProps) {
   }, [messages]);
 
   useEffect(() => {
-    sessionId.current = `${agentId}_${Date.now()}`;
+    sessionId.current = `agent_${agentId}_main`;
     fetchAgents().then(agents => {
       const found = agents.find(a => a.id === agentId);
       setAgent(found || null);
       if (found) {
-        setMessages([
-          { id: 'sys', role: 'system', content: `已进入 ${found.name} 交互模式`, timestamp: now() },
-          { id: 'intro', role: 'agent', content: `你好，我是${found.name}。${found.description}。有什么可以帮你的？`, timestamp: now() },
-        ]);
+        fetchSessionMessages(sessionId.current).then(history => {
+          if (history.length > 0) {
+            const restored: ChatMsg[] = history.map(m => ({
+              id: m.id,
+              role: m.role === 'user' ? 'human' : (m.role === 'assistant' ? 'agent' : m.role) as ChatMsg['role'],
+              content: m.content,
+              timestamp: m.timestamp
+                ? new Date(m.timestamp * 1000).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+                : '',
+            }));
+            setMessages(restored);
+          } else {
+            setMessages([
+              { id: 'sys', role: 'system', content: `已进入 ${found.name} 交互模式`, timestamp: now() },
+              { id: 'intro', role: 'agent', content: `你好，我是${found.name}。${found.description}。有什么可以帮你的？`, timestamp: now() },
+            ]);
+          }
+        });
       }
     });
   }, [agentId]);

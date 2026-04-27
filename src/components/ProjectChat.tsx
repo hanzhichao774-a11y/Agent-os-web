@@ -1,8 +1,8 @@
 import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
-import { Send, Loader2, Paperclip, Plus, FolderOpen, Download } from 'lucide-react';
+import { Send, Loader2, Paperclip, Plus, FolderOpen, Download, ExternalLink } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { streamTeamChat, uploadDocument, fetchTasks } from '../services/api';
+import { streamTeamChat, uploadDocument, fetchTasks, fetchSessionMessages, getWorkspaceFileUrl } from '../services/api';
 import type { TeamChatEvent, TaskInfo } from '../services/api';
 import type { TeamAgentStatus, TeamTaskStep, OutputItem } from '../App';
 
@@ -82,8 +82,8 @@ const MEMBER_COLORS = [
   { bg: 'bg-violet-500', text: 'text-white' },
 ];
 
-const OUTPUT_TYPE_PATTERN = /已生成(柱状图|折线图|饼图|散点图|热力图|雷达图|表格|报告|文档|PPT|PDF|图表)[：:]\s*(.+)/g;
-const OUTPUT_FILE_PATTERN = /已生成\s+(\S+\.(pdf|xlsx|xls|csv|png|jpg|pptx?|docx?|txt|md))/gi;
+const OUTPUT_TYPE_PATTERN = /已生成\**\s*(柱状图|折线图|饼图|散点图|热力图|雷达图|表格|报告|文档|PPT|PDF|图表)\**[：:]\s*(.+)/g;
+const OUTPUT_FILE_PATTERN = /(?:已生成|文件名称|文件名|文件路径|生成文件)\**[：:\s]+`?(\S+?\.(pdf|xlsx|xls|csv|png|jpg|pptx?|docx?|txt|md))`?/gi;
 
 function parseOutputItems(content: string, msgId: string, agentName?: string, timestamp?: string): OutputItem[] {
   const items: OutputItem[] = [];
@@ -130,14 +130,37 @@ function parseOutputItems(content: string, msgId: string, agentName?: string, ti
 
 function OutputCards({ items }: { items: OutputItem[] }) {
   if (items.length === 0) return null;
+
+  const isPreviewable = (name: string) =>
+    /\.(pdf|png|jpe?g|gif|webp|svg|txt|md|json|csv)$/i.test(name);
+
+  const handleClick = (title: string) => {
+    const url = getWorkspaceFileUrl(title);
+    if (isPreviewable(title)) {
+      window.open(url, '_blank');
+    } else {
+      fetch(url).then(r => r.blob()).then(blob => {
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = title;
+        a.click();
+        URL.revokeObjectURL(a.href);
+      });
+    }
+  };
+
   return (
     <div className="mt-3 space-y-2">
       {items.map((item) => (
         <div
           key={item.id}
+          onClick={() => handleClick(item.title)}
           className="flex items-center gap-3 border border-border rounded-lg px-4 py-3 hover:bg-primary/5 transition-colors cursor-pointer group"
         >
-          <Download className="w-4 h-4 text-primary shrink-0" />
+          {isPreviewable(item.title)
+            ? <ExternalLink className="w-4 h-4 text-primary shrink-0" />
+            : <Download className="w-4 h-4 text-primary shrink-0" />
+          }
           <span className="flex-1 text-sm font-medium text-primary truncate">{item.title}</span>
           <span className="text-xs text-primary font-medium shrink-0">{item.type}</span>
         </div>
@@ -202,14 +225,30 @@ export default function ProjectChat({ projectId, taskId, projectName, projectDes
     if (cached && cached.length > 0) {
       setMessages(cached);
     } else {
-      setMessages([
-        {
-          id: `sys_${newSessionId}`,
-          role: 'system',
-          content: `群主 BizAgent 已创建项目：${projectName}`,
-          timestamp: now(),
-        },
-      ]);
+      const backendSessionId = `team_${projectId}_${newSessionId}`;
+      fetchSessionMessages(backendSessionId).then(history => {
+        if (history.length > 0) {
+          const restored: ChatMsg[] = history.map(m => ({
+            id: m.id,
+            role: m.role === 'user' ? 'human' : (m.role === 'assistant' ? 'member' : m.role) as ChatMsg['role'],
+            content: m.content,
+            agentName: m.agent_name,
+            timestamp: m.timestamp
+              ? new Date(m.timestamp * 1000).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+              : '',
+          }));
+          setMessages(restored);
+        } else {
+          setMessages([
+            {
+              id: `sys_${newSessionId}`,
+              role: 'system',
+              content: `群主 BizAgent 已创建项目：${projectName}`,
+              timestamp: now(),
+            },
+          ]);
+        }
+      });
     }
   }, [projectId, projectName, taskId]);
 

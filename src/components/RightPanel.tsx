@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
-import { Circle, FileText, Network } from 'lucide-react';
-import { fetchWorkspaceFiles } from '../services/api';
+import { Circle, FileText, Network, Download, ExternalLink } from 'lucide-react';
+import { fetchWorkspaceFiles, fetchKnowledgeDocs, getWorkspaceFileUrl } from '../services/api';
 import type { WorkspaceFile } from '../services/api';
 import type { OutputItem } from '../App';
 
@@ -63,6 +63,30 @@ function formatSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
 }
 
+function isPreviewable(name: string): boolean {
+  const ext = name.split('.').pop()?.toLowerCase() || '';
+  return ['pdf', 'png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'txt', 'md', 'json', 'csv'].includes(ext);
+}
+
+async function downloadFile(filename: string) {
+  const url = getWorkspaceFileUrl(filename);
+  try {
+    const resp = await fetch(url);
+    if (!resp.ok) return;
+    const blob = await resp.blob();
+    const blobUrl = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = blobUrl;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(blobUrl);
+  } catch {
+    window.open(url, '_blank');
+  }
+}
+
 
 function DataOutputPanel({ outputs }: { outputs: OutputItem[] }) {
   return (
@@ -93,30 +117,32 @@ function DataOutputPanel({ outputs }: { outputs: OutputItem[] }) {
 
 function FilesPanel({ outputs }: { outputs: OutputItem[] }) {
   const [files, setFiles] = useState<WorkspaceFile[]>([]);
+  const [uploadedDocs, setUploadedDocs] = useState<Array<{ doc_name: string; chunks: number }>>([]);
 
   useEffect(() => {
     fetchWorkspaceFiles().then(setFiles).catch(() => {});
+    fetchKnowledgeDocs().then(setUploadedDocs).catch(() => {});
   }, []);
 
   return (
     <div className="h-full overflow-y-auto px-4 py-4 space-y-6">
-      {/* Uploaded files */}
+      {/* Uploaded docs (knowledge base) */}
       <div>
         <h4 className="text-xs font-semibold text-text-muted uppercase tracking-wider mb-3">上传文件</h4>
         <div className="space-y-1">
-          {files.length === 0 && (
+          {uploadedDocs.length === 0 && (
             <p className="text-xs text-text-muted py-3 text-center">暂无上传文件</p>
           )}
-          {files.map(f => {
-            const { ext, colors } = getExtLabel(f.name);
+          {uploadedDocs.map(doc => {
+            const { ext, colors } = getExtLabel(doc.doc_name);
             return (
-              <div key={f.name} className="flex items-center gap-3 px-2 py-2.5 rounded-lg hover:bg-bg transition-colors">
+              <div key={doc.doc_name} className="flex items-center gap-3 px-2 py-2.5 rounded-lg hover:bg-bg transition-colors">
                 <span className={`text-[10px] font-bold px-2 py-1 rounded-md ${colors.bg} ${colors.text} shrink-0 min-w-[40px] text-center`}>
                   {ext}
                 </span>
                 <div className="min-w-0 flex-1">
-                  <p className="text-sm text-text font-medium truncate">{f.name}</p>
-                  <p className="text-[10px] text-text-muted">{formatSize(f.size)}</p>
+                  <p className="text-sm text-text font-medium truncate">{doc.doc_name}</p>
+                  <p className="text-[10px] text-text-muted">{doc.chunks} 个段落</p>
                 </div>
               </div>
             );
@@ -124,23 +150,42 @@ function FilesPanel({ outputs }: { outputs: OutputItem[] }) {
         </div>
       </div>
 
-      {/* Output files from chat */}
+      {/* Generated workspace files */}
       <div>
-        <h4 className="text-xs font-semibold text-text-muted uppercase tracking-wider mb-3">产出</h4>
+        <h4 className="text-xs font-semibold text-text-muted uppercase tracking-wider mb-3">产出文件</h4>
         <div className="space-y-1">
-          {outputs.length === 0 ? (
-            <p className="text-xs text-text-muted py-3 text-center">对话中尚无产出文件</p>
+          {files.length === 0 ? (
+            <p className="text-xs text-text-muted py-3 text-center">暂无产出文件</p>
           ) : (
-            outputs.map(item => {
-              const typeColors = OUTPUT_TYPE_COLORS[item.type] || DEFAULT_OUTPUT_COLOR;
+            files.map(f => {
+              const { ext, colors } = getExtLabel(f.name);
+              const previewable = isPreviewable(f.name);
               return (
-                <div key={item.id} className="flex items-center gap-3 px-2 py-2.5 rounded-lg hover:bg-bg transition-colors cursor-pointer">
-                  <span className={`text-[10px] font-bold px-2 py-1 rounded-md ${typeColors.bg} ${typeColors.text} shrink-0 min-w-[40px] text-center`}>
-                    {item.type}
+                <div key={f.name} className="flex items-center gap-3 px-2 py-2.5 rounded-lg hover:bg-bg transition-colors group">
+                  <span className={`text-[10px] font-bold px-2 py-1 rounded-md ${colors.bg} ${colors.text} shrink-0 min-w-[40px] text-center`}>
+                    {ext}
                   </span>
                   <div className="min-w-0 flex-1">
-                    <p className="text-sm text-text font-medium truncate">{item.title}</p>
-                    {item.agentName && <p className="text-[10px] text-text-muted">{item.agentName.replace(/^\S+\s/, '')}</p>}
+                    <p className="text-sm text-text font-medium truncate">{f.name}</p>
+                    <p className="text-[10px] text-text-muted">{formatSize(f.size)}</p>
+                  </div>
+                  <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                    {previewable && (
+                      <button
+                        onClick={() => window.open(getWorkspaceFileUrl(f.name), '_blank')}
+                        className="p-1 rounded hover:bg-border transition-colors"
+                        title="预览"
+                      >
+                        <ExternalLink className="w-3.5 h-3.5 text-text-muted" />
+                      </button>
+                    )}
+                    <button
+                      onClick={() => downloadFile(f.name)}
+                      className="p-1 rounded hover:bg-border transition-colors"
+                      title="下载"
+                    >
+                      <Download className="w-3.5 h-3.5 text-text-muted" />
+                    </button>
                   </div>
                 </div>
               );

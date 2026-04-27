@@ -424,3 +424,55 @@ export async function streamSkillChat(
     }
   }
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// LLM 配置管理
+// ═══════════════════════════════════════════════════════════════════════════════
+
+export interface LLMSettings {
+  provider: string;
+  model_id: string;
+  api_key: string;
+  base_url: string;
+  providers?: string[];
+  default_models?: Record<string, string>;
+}
+
+export interface LLMTestResult {
+  ok: boolean;
+  message: string;
+}
+
+export async function fetchLLMSettings(): Promise<LLMSettings> {
+  const res = await fetch(`${API_BASE}/api/settings/llm`);
+  if (!res.ok) throw new Error('获取 LLM 配置失败');
+  return res.json();
+}
+
+export async function saveLLMSettings(settings: {
+  provider: string;
+  model_id: string;
+  api_key: string;
+  base_url: string;
+}): Promise<{ success: boolean }> {
+  const res = await fetch(`${API_BASE}/api/settings/llm`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(settings),
+  });
+  return res.json();
+}
+
+export async function testLLMConnection(settings: {
+  provider: string;
+  model_id: string;
+  api_key: string;
+  base_url: string;
+}): Promise<LLMTestResult> {
+  const res = await fetch(`${API_BASE}/api/settings/llm/test`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(settings),
+  });
+  return res.json();
+}

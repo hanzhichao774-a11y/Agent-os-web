@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
-  Home, Bot, Wrench, Plus, Bell, Moon, Sun,
+  Home, Bot, Wrench, Plus, Bell, Moon, Sun, Settings,
   ChevronLeft, ChevronRight, ChevronDown, Trash2, MoreHorizontal, MessageCircle, X
 } from 'lucide-react';
 import { createProject, deleteProject, fetchTasks, createTask, deleteTask } from '../services/api';
@@ -14,6 +14,7 @@ interface SidebarProps {
   onNavigate: (view: string, projectId?: string, taskId?: string | null) => void;
   projects: ProjectInfo[];
   onRefreshProjects: () => void;
+  onOpenSettings: () => void;
 }
 
 const navItems = [
@@ -22,7 +23,7 @@ const navItems = [
   { key: 'skill', label: 'Skills', icon: Wrench },
 ];
 
-export default function Sidebar({ activeView, activeProjectId, activeTaskId, onNavigate, projects, onRefreshProjects }: SidebarProps) {
+export default function Sidebar({ activeView, activeProjectId, activeTaskId, onNavigate, projects, onRefreshProjects, onOpenSettings }: SidebarProps) {
   const [collapsed, setCollapsed] = useState(false);
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [newName, setNewName] = useState('');
@@ -216,6 +217,17 @@ export default function Sidebar({ activeView, activeProjectId, activeTaskId, onN
           </div>
           {!collapsed && <span className="truncate text-text">samhar</span>}
         </div>
+
+        <button
+          onClick={onOpenSettings}
+          className={`w-full flex items-center rounded-lg text-sm text-text-secondary hover:bg-bg transition-colors ${
+            collapsed ? 'justify-center px-2 py-1.5' : 'gap-2.5 px-2.5 py-1.5'
+          }`}
+          title={collapsed ? '模型配置' : undefined}
+        >
+          <Settings className="w-[18px] h-[18px] shrink-0" />
+          {!collapsed && <span>模型配置</span>}
+        </button>
 
         <button
           onClick={toggleDark}

@@ -1,0 +1,33 @@
+---
+description: 后端开发环境配置与启动规则
+globs: backend/**
+alwaysApply: false
+---
+
+## 后端环境
+
+- Python 虚拟环境路径: `backend/.venv`（Python 3.12）
+- 启动后端服务时必须先激活虚拟环境，不要使用系统 Python
+
+### 启动命令
+
+```bash
+cd backend
+source .venv/bin/activate
+uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+```
+
+### 安装依赖
+
+```bash
+cd backend
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+### 注意事项
+
+- 系统 Python 版本为 3.9，缺少项目依赖，不可直接使用
+- 虚拟环境中的 Python 版本为 3.12，已安装全部依赖
+- `.env` 文件位于 `backend/.env`，包含 LLM 配置（API Key、Provider、Model ID）
+- 数据持久化在 `backend/data/` 目录下的 SQLite 数据库中

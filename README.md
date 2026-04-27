@@ -27,7 +27,7 @@
 | 后端 | FastAPI + Agno Framework |
 | 向量库 | LanceDb（本地文件存储，零依赖部署） |
 | 嵌入模型 | FastEmbed + BAAI/bge-small-zh-v1.5（本地 ONNX 推理） |
-| LLM | 可配置：MiniMax / OpenAI / Anthropic |
+| LLM | 可配置：Kimi / OpenAI / MiniMax / 自定义（千问等 OpenAI 兼容服务） |
 
 ## 项目结构
 
@@ -90,21 +90,24 @@ cp .env.example .env
 编辑 `backend/.env`，根据你使用的 LLM 提供商配置：
 
 ```env
-# MiniMax（推荐国内使用）
-MODEL_PROVIDER=minimax
-MODEL_ID=MiniMax-M2.7
-MINIMAX_API_KEY=sk-xxx
+# Kimi（推荐）
+MODEL_PROVIDER=kimi
+MODEL_ID=kimi-k2.6
+KIMI_API_KEY=sk-xxx
 
 # 或 OpenAI
 MODEL_PROVIDER=openai
 MODEL_ID=gpt-4o-mini
 OPENAI_API_KEY=sk-xxx
 
-# 或 Anthropic
-MODEL_PROVIDER=anthropic
-MODEL_ID=claude-sonnet-4-6
-ANTHROPIC_API_KEY=sk-ant-xxx
+# 或自定义/私有化部署（千问等 OpenAI 兼容服务）
+MODEL_PROVIDER=custom
+CUSTOM_MODEL_ID=qwen-plus
+CUSTOM_API_KEY=sk-xxx
+CUSTOM_BASE_URL=http://your-host:8080/v1
 ```
+
+> 也可以在前端侧栏底部「模型配置」中在线修改 LLM 配置，保存后立即生效，无需重启服务。
 
 ### 3. 启动服务
 
@@ -137,6 +140,9 @@ npm run dev
 | POST | `/api/skills/{id}/run` | 执行技能 |
 | POST | `/api/knowledge/upload` | 上传文档到知识库 |
 | GET | `/api/knowledge/docs` | 获取已上传文档列表 |
+| GET | `/api/settings/llm` | 获取当前 LLM 配置 |
+| PUT | `/api/settings/llm` | 保存 LLM 配置 |
+| POST | `/api/settings/llm/test` | 测试 LLM 连通性 |
 
 ## 自定义技能
 

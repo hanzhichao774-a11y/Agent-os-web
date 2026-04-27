@@ -8,6 +8,7 @@ import ProjectFilePanel from './components/ProjectFilePanel';
 import AgentPage from './components/AgentPage';
 import SkillPage from './components/SkillPage';
 import RightPanel from './components/RightPanel';
+import SettingsModal from './components/SettingsModal';
 import { fetchProjects } from './services/api';
 import type { ProjectInfo } from './services/api';
 
@@ -47,6 +48,7 @@ function App() {
   const [teamAgents, setTeamAgents] = useState<TeamAgentStatus[]>([]);
   const [teamSteps, setTeamSteps] = useState<TeamTaskStep[]>([]);
   const [chatOutputs, setChatOutputs] = useState<OutputItem[]>([]);
+  const [showSettings, setShowSettings] = useState(false);
 
   const [projects, setProjects] = useState<ProjectInfo[]>([]);
 
@@ -106,6 +108,7 @@ function App() {
         onNavigate={handleNavigate}
         projects={projects}
         onRefreshProjects={loadProjects}
+        onOpenSettings={() => setShowSettings(true)}
       />
 
       {/* Center content area */}
@@ -175,6 +178,8 @@ function App() {
           <BizAgent activeView={activeView} selectedAgentName={selectedAgentName} onClearAgent={() => setSelectedAgentName(null)} selectedSkillId={selectedSkillId} onClearSkill={() => setSelectedSkillId(null)} />
         </div>
       )}
+
+      <SettingsModal open={showSettings} onClose={() => setShowSettings(false)} />
     </div>
   );
 }

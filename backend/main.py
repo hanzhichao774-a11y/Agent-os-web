@@ -75,6 +75,13 @@ def _init_projects_db():
             FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
         )
     """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS settings (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+    """)
     conn.commit()
     count = conn.execute("SELECT COUNT(*) FROM projects").fetchone()[0]
     if count == 0:
@@ -107,35 +114,82 @@ app.add_middleware(
 # 模型工厂
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def create_model():
-    provider = os.getenv("MODEL_PROVIDER", "openai").lower()
-    model_id = os.getenv("MODEL_ID")
+_PROVIDER_API_KEY_MAP = {
+    "kimi": "KIMI_API_KEY",
+    "minimax": "MINIMAX_API_KEY",
+    "openai": "OPENAI_API_KEY",
+}
 
-    if provider == "minimax":
-        from agno.models.openai import OpenAIChat
-        return OpenAIChat(
-            id=model_id or "MiniMax-M2.7",
-            api_key=os.getenv("MINIMAX_API_KEY"),
-            base_url="https://api.minimaxi.com/v1",
-            role_map={"system": "system", "user": "user", "assistant": "assistant", "tool": "tool", "model": "assistant"},
-            timeout=120,
-        )
-    elif provider == "kimi":
-        from agno.models.openai import OpenAIChat
-        return OpenAIChat(
-            id=model_id or "kimi-k2.6",
-            api_key=os.getenv("KIMI_API_KEY"),
-            base_url="https://api.moonshot.cn/v1",
-            role_map={"system": "system", "user": "user", "assistant": "assistant", "tool": "tool", "model": "assistant"},
-            extra_body={"thinking": {"type": "disabled"}},
-            timeout=120,
-        )
-    elif provider == "anthropic":
-        from agno.models.anthropic import Claude
-        return Claude(id=model_id or "claude-3-5-sonnet-20241022")
-    else:
-        from agno.models.openai import OpenAIChat
-        return OpenAIChat(id=model_id or "gpt-4o-mini")
+_PROVIDER_BASE_URL_MAP = {
+    "kimi": "https://api.moonshot.cn/v1",
+    "minimax": "https://api.minimaxi.com/v1",
+}
+
+_PROVIDER_DEFAULT_MODEL = {
+    "kimi": "kimi-k2.6",
+    "minimax": "MiniMax-M2.7",
+    "openai": "gpt-4o-mini",
+    "custom": "qwen-plus",
+}
+
+
+def _get_llm_config() -> dict:
+    """从 DB 读取 LLM 配置，无则回退到 .env。"""
+    conn = _get_projects_conn()
+    rows = conn.execute(
+        "SELECT key, value FROM settings WHERE key LIKE 'llm_%'"
+    ).fetchall()
+    conn.close()
+    db_cfg = {r["key"]: r["value"] for r in rows}
+    if db_cfg.get("llm_provider"):
+        return {
+            "provider": db_cfg["llm_provider"],
+            "model_id": db_cfg.get("llm_model_id", ""),
+            "api_key": db_cfg.get("llm_api_key", ""),
+            "base_url": db_cfg.get("llm_base_url", ""),
+        }
+    provider = os.getenv("MODEL_PROVIDER", "openai").lower()
+    env_key = _PROVIDER_API_KEY_MAP.get(provider)
+    return {
+        "provider": provider,
+        "model_id": os.getenv("MODEL_ID", ""),
+        "api_key": os.getenv(env_key) if env_key else os.getenv("CUSTOM_API_KEY", ""),
+        "base_url": os.getenv("CUSTOM_BASE_URL", ""),
+    }
+
+_COMPAT_ROLE_MAP = {
+    "system": "system",
+    "user": "user",
+    "assistant": "assistant",
+    "tool": "tool",
+    "model": "assistant",
+}
+
+_PROVIDER_EXTRA_KWARGS: dict[str, dict] = {
+    "kimi": {
+        "extra_body": {"thinking": {"type": "disabled"}},
+        "role_map": _COMPAT_ROLE_MAP,
+    },
+    "minimax": {"role_map": _COMPAT_ROLE_MAP},
+    "custom": {"role_map": _COMPAT_ROLE_MAP},
+}
+
+
+def create_model():
+    cfg = _get_llm_config()
+    provider = cfg["provider"]
+    model_id = cfg["model_id"] or _PROVIDER_DEFAULT_MODEL.get(provider, "gpt-4o-mini")
+    api_key = cfg["api_key"]
+    base_url = cfg["base_url"] or _PROVIDER_BASE_URL_MAP.get(provider)
+
+    from agno.models.openai import OpenAIChat
+    kwargs = dict(id=model_id, timeout=120)
+    if api_key:
+        kwargs["api_key"] = api_key
+    if base_url:
+        kwargs["base_url"] = base_url
+    kwargs.update(_PROVIDER_EXTRA_KWARGS.get(provider, {}))
+    return OpenAIChat(**kwargs)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -744,15 +798,127 @@ class AgentToolsRequest(BaseModel):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# 路由：LLM 配置管理
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _mask_api_key(key: str) -> str:
+    """脱敏 API Key，保留前 6 位和后 4 位。"""
+    if not key or len(key) <= 12:
+        return key
+    return key[:6] + "..." + key[-4:]
+
+
+class LLMSettingsRequest(BaseModel):
+    provider: str
+    model_id: str = ""
+    api_key: str = ""
+    base_url: str = ""
+
+
+@app.get("/api/settings/llm")
+async def api_get_llm_settings():
+    cfg = _get_llm_config()
+    return {
+        "provider": cfg["provider"],
+        "model_id": cfg["model_id"],
+        "api_key": _mask_api_key(cfg["api_key"]),
+        "base_url": cfg["base_url"],
+        "providers": list(_PROVIDER_DEFAULT_MODEL.keys()),
+        "default_models": _PROVIDER_DEFAULT_MODEL,
+    }
+
+
+@app.put("/api/settings/llm")
+async def api_save_llm_settings(req: LLMSettingsRequest):
+    now = datetime.now(timezone.utc).isoformat()
+    conn = _get_projects_conn()
+
+    api_key = req.api_key
+    if "..." in api_key:
+        existing = conn.execute(
+            "SELECT value FROM settings WHERE key = 'llm_api_key'"
+        ).fetchone()
+        if existing:
+            api_key = existing["value"]
+        else:
+            cfg = _get_llm_config()
+            api_key = cfg["api_key"]
+
+    pairs = {
+        "llm_provider": req.provider,
+        "llm_model_id": req.model_id,
+        "llm_api_key": api_key,
+        "llm_base_url": req.base_url,
+    }
+    for k, v in pairs.items():
+        conn.execute(
+            "INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+            (k, v, now),
+        )
+    conn.commit()
+    conn.close()
+
+    _agents.clear()
+    _teams.clear()
+
+    return {"success": True}
+
+
+@app.post("/api/settings/llm/test")
+async def api_test_llm_connection(req: LLMSettingsRequest):
+    """用提交的配置做一次轻量 LLM 调用，测试连通性。"""
+    api_key = req.api_key
+    if "..." in api_key:
+        conn = _get_projects_conn()
+        existing = conn.execute(
+            "SELECT value FROM settings WHERE key = 'llm_api_key'"
+        ).fetchone()
+        conn.close()
+        if existing:
+            api_key = existing["value"]
+        else:
+            cfg = _get_llm_config()
+            api_key = cfg["api_key"]
+
+    try:
+        from agno.models.openai import OpenAIChat
+
+        provider = req.provider.lower()
+        model_id = req.model_id or _PROVIDER_DEFAULT_MODEL.get(provider, "gpt-4o-mini")
+        base_url = req.base_url or _PROVIDER_BASE_URL_MAP.get(provider)
+
+        kwargs = dict(id=model_id, timeout=15)
+        if api_key:
+            kwargs["api_key"] = api_key
+        if base_url:
+            kwargs["base_url"] = base_url
+        kwargs.update(_PROVIDER_EXTRA_KWARGS.get(provider, {}))
+        model = OpenAIChat(**kwargs)
+
+        test_agent = Agent(model=model, instructions=["回复OK"], markdown=False)
+        resp = await test_agent.arun("ping", stream=False)
+        content = (resp.content or "").strip()
+        error_keywords = ["invalid", "unauthorized", "error", "failed", "denied", "forbidden", "401", "403"]
+        content_lower = content.lower()
+        if any(kw in content_lower for kw in error_keywords) or not content:
+            return {"ok": False, "message": f"认证失败，模型返回: {content[:200]}"}
+        return {"ok": True, "message": f"连接成功，模型响应: {content[:100]}"}
+    except Exception as e:
+        return {"ok": False, "message": f"连接失败: {str(e)[:200]}"}
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # 路由：健康检查 & Agent 聊天
 # ═══════════════════════════════════════════════════════════════════════════════
 
 @app.get("/health")
 async def health():
+    cfg = _get_llm_config()
     return {
         "status": "ok",
-        "model_provider": os.getenv("MODEL_PROVIDER", "openai"),
-        "model_id": os.getenv("MODEL_ID", "gpt-4o-mini"),
+        "model_provider": cfg["provider"],
+        "model_id": cfg["model_id"],
         "skills_count": len(_skill_registry),
         "docs_count": len(list_documents()),
     }
@@ -1634,30 +1800,36 @@ async def api_run_workflow(workflow_id: str, request: WorkflowRunRequest):
 
     async def generate():
         user_input = request.input
+        _heading_sep = '\n\n---\n\n'
 
         if workflow_id == "ppt_pipeline":
             yield f"data: {json.dumps({'content': '[STEP:1]', 'done': False})}\n\n"
-            yield f"data: {json.dumps({'content': '正在分析主题并生成 PPT...\n\n', 'done': False})}\n\n"
+            _msg = '正在分析主题并生成 PPT...\n\n'
+            yield f"data: {json.dumps({'content': _msg, 'done': False})}\n\n"
 
             ppt_agent = get_agent("a7")
             if ppt_agent:
-                prompt = f"请根据以下需求生成一个 PPT 文件：{user_input}\n请使用 python-pptx 生成 .pptx 文件并保存。"
+                prompt = "请根据以下需求生成一个 PPT 文件：" + user_input + "\n请使用 python-pptx 生成 .pptx 文件并保存。"
                 try:
                     for step_idx in range(1, len(steps) + 1):
-                        yield f"data: {json.dumps({'content': f'[STEP:{step_idx}]', 'done': False})}\n\n"
+                        _step = f'[STEP:{step_idx}]'
+                        yield f"data: {json.dumps({'content': _step, 'done': False})}\n\n"
                     async for chunk in ppt_agent.arun(prompt, stream=True):
                         if chunk.content:
                             yield f"data: {json.dumps({'content': chunk.content, 'done': False})}\n\n"
                 except Exception as e:
-                    yield f"data: {json.dumps({'content': f'\n\n执行出错: {e}', 'done': False})}\n\n"
+                    _err = f'\n\n执行出错: {e}'
+                    yield f"data: {json.dumps({'content': _err, 'done': False})}\n\n"
 
         elif workflow_id == "data_pipeline":
             data_agent = get_agent("a1")
             code_agent = get_agent("a3")
 
             for step_idx, step_name in enumerate(steps, 1):
-                yield f"data: {json.dumps({'content': f'[STEP:{step_idx}]', 'done': False})}\n\n"
-                yield f"data: {json.dumps({'content': f'### 步骤 {step_idx}: {step_name}\n\n', 'done': False})}\n\n"
+                _step = f'[STEP:{step_idx}]'
+                yield f"data: {json.dumps({'content': _step, 'done': False})}\n\n"
+                _heading = f'### 步骤 {step_idx}: {step_name}\n\n'
+                yield f"data: {json.dumps({'content': _heading, 'done': False})}\n\n"
 
                 if step_idx <= 3 and data_agent:
                     prompt = f"[{step_name}] 用户需求：{user_input}"
@@ -1666,7 +1838,8 @@ async def api_run_workflow(workflow_id: str, request: WorkflowRunRequest):
                             if chunk.content:
                                 yield f"data: {json.dumps({'content': chunk.content, 'done': False})}\n\n"
                     except Exception as e:
-                        yield f"data: {json.dumps({'content': f'出错: {e}', 'done': False})}\n\n"
+                        _err = f'出错: {e}'
+                        yield f"data: {json.dumps({'content': _err, 'done': False})}\n\n"
                 elif step_idx == 4 and code_agent:
                     try:
                         async for chunk in code_agent.arun(
@@ -1675,17 +1848,20 @@ async def api_run_workflow(workflow_id: str, request: WorkflowRunRequest):
                             if chunk.content:
                                 yield f"data: {json.dumps({'content': chunk.content, 'done': False})}\n\n"
                     except Exception as e:
-                        yield f"data: {json.dumps({'content': f'出错: {e}', 'done': False})}\n\n"
+                        _err = f'出错: {e}'
+                        yield f"data: {json.dumps({'content': _err, 'done': False})}\n\n"
 
-                yield f"data: {json.dumps({'content': '\n\n---\n\n', 'done': False})}\n\n"
+                yield f"data: {json.dumps({'content': _heading_sep, 'done': False})}\n\n"
 
         elif workflow_id == "doc_pipeline":
             knowledge_agent = get_agent("a2")
             data_agent = get_agent("a1")
 
             for step_idx, step_name in enumerate(steps, 1):
-                yield f"data: {json.dumps({'content': f'[STEP:{step_idx}]', 'done': False})}\n\n"
-                yield f"data: {json.dumps({'content': f'### 步骤 {step_idx}: {step_name}\n\n', 'done': False})}\n\n"
+                _step = f'[STEP:{step_idx}]'
+                yield f"data: {json.dumps({'content': _step, 'done': False})}\n\n"
+                _heading = f'### 步骤 {step_idx}: {step_name}\n\n'
+                yield f"data: {json.dumps({'content': _heading, 'done': False})}\n\n"
 
                 agent_to_use = knowledge_agent if step_idx <= 2 else data_agent
                 if agent_to_use:
@@ -1695,9 +1871,10 @@ async def api_run_workflow(workflow_id: str, request: WorkflowRunRequest):
                             if chunk.content:
                                 yield f"data: {json.dumps({'content': chunk.content, 'done': False})}\n\n"
                     except Exception as e:
-                        yield f"data: {json.dumps({'content': f'出错: {e}', 'done': False})}\n\n"
+                        _err = f'出错: {e}'
+                        yield f"data: {json.dumps({'content': _err, 'done': False})}\n\n"
 
-                yield f"data: {json.dumps({'content': '\n\n---\n\n', 'done': False})}\n\n"
+                yield f"data: {json.dumps({'content': _heading_sep, 'done': False})}\n\n"
 
         yield f"data: {json.dumps({'content': '', 'done': True})}\n\n"
 

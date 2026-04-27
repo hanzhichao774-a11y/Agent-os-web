@@ -19,6 +19,8 @@ from agno.knowledge.knowledge import Knowledge
 from agno.knowledge.embedder.fastembed import FastEmbedEmbedder
 from agno.knowledge.chunking.recursive import RecursiveChunking
 from agno.vectordb.lancedb import LanceDb
+from agno.knowledge.reranker.base import Reranker as BaseReranker
+from agno.knowledge.document.base import Document as AgnoDocument
 from agno.tools.pandas import PandasTools
 from agno.tools.duckdb import DuckDbTools
 from agno.tools.csv_toolkit import CsvTools
@@ -244,26 +246,194 @@ scan_skills()
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# 知识库 (Agno Knowledge + LanceDb + FastEmbed)
+# ═══════════════════════════════════════════════════════════════════════════════
+# Embedding / Reranker 配置
 # ═══════════════════════════════════════════════════════════════════════════════
 
-_embedder = FastEmbedEmbedder(id="BAAI/bge-small-zh-v1.5", dimensions=512)
+def _get_embedding_config() -> dict:
+    """从 DB 读取 Embedding 配置，无则回退到 .env。"""
+    conn = _get_projects_conn()
+    rows = conn.execute(
+        "SELECT key, value FROM settings WHERE key LIKE 'embedding_%'"
+    ).fetchall()
+    conn.close()
+    db_cfg = {r["key"]: r["value"] for r in rows}
+    if db_cfg.get("embedding_model_id"):
+        return {
+            "mode": "api",
+            "model_id": db_cfg["embedding_model_id"],
+            "api_key": db_cfg.get("embedding_api_key", ""),
+            "base_url": db_cfg.get("embedding_base_url", ""),
+            "dimensions": int(db_cfg.get("embedding_dimensions", "1024")),
+        }
+    env_model = os.getenv("EMBEDDING_MODEL_ID", "")
+    if env_model:
+        return {
+            "mode": "api",
+            "model_id": env_model,
+            "api_key": os.getenv("EMBEDDING_API_KEY", ""),
+            "base_url": os.getenv("EMBEDDING_BASE_URL", ""),
+            "dimensions": int(os.getenv("EMBEDDING_DIMENSIONS", "1024")),
+        }
+    return {"mode": "local", "model_id": "", "api_key": "", "base_url": "", "dimensions": 512}
+
+
+def _get_reranker_config() -> dict:
+    """从 DB 读取 Reranker 配置，无则回退到 .env。"""
+    conn = _get_projects_conn()
+    rows = conn.execute(
+        "SELECT key, value FROM settings WHERE key LIKE 'reranker_%'"
+    ).fetchall()
+    conn.close()
+    db_cfg = {r["key"]: r["value"] for r in rows}
+    if db_cfg.get("reranker_model_id"):
+        return {
+            "enabled": db_cfg.get("reranker_enabled", "true").lower() == "true",
+            "model_id": db_cfg["reranker_model_id"],
+            "api_key": db_cfg.get("reranker_api_key", ""),
+            "base_url": db_cfg.get("reranker_base_url", ""),
+            "top_n": int(db_cfg.get("reranker_top_n", "5")),
+        }
+    env_model = os.getenv("RERANKER_MODEL_ID", "")
+    if env_model:
+        return {
+            "enabled": True,
+            "model_id": env_model,
+            "api_key": os.getenv("RERANKER_API_KEY", ""),
+            "base_url": os.getenv("RERANKER_BASE_URL", ""),
+            "top_n": int(os.getenv("RERANKER_TOP_N", "5")),
+        }
+    return {"enabled": False, "model_id": "", "api_key": "", "base_url": "", "top_n": 5}
+
+
+class OpenAICompatibleReranker(BaseReranker):
+    """兼容 Jina/Cohere (/v1/rerank) 和 TEI (/rerank) 两种 rerank API 格式。"""
+    model: str = "qw3-reranke-8b"
+    api_key: str = ""
+    base_url: str = ""
+    top_n: int = 5
+
+    def _call_rerank(self, query: str, documents: list[str]) -> list[dict]:
+        import httpx
+        headers = {"Content-Type": "application/json"}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+
+        base = self.base_url.rstrip("/")
+
+        # 先尝试 Jina/Cohere 格式: POST /v1/rerank
+        jina_url = f"{base}/v1/rerank"
+        jina_body = {
+            "model": self.model,
+            "query": query,
+            "documents": documents,
+            "top_n": self.top_n,
+        }
+        try:
+            resp = httpx.post(jina_url, json=jina_body, headers=headers, timeout=30)
+            if resp.status_code != 404:
+                resp.raise_for_status()
+                data = resp.json()
+                return data.get("results", [])
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code != 404:
+                raise
+        except httpx.ConnectError:
+            pass
+
+        # Fallback: TEI 格式: POST /rerank
+        tei_url = f"{base}/rerank"
+        tei_body = {"query": query, "texts": documents, "truncate": True}
+        resp = httpx.post(tei_url, json=tei_body, headers=headers, timeout=30)
+        resp.raise_for_status()
+        data = resp.json()
+        if isinstance(data, list):
+            return [{"index": item.get("index", i), "relevance_score": item.get("score", 0)} for i, item in enumerate(data)]
+        return data.get("results", [])
+
+    def rerank(self, query: str, documents: list[AgnoDocument]) -> list[AgnoDocument]:
+        if not documents:
+            return []
+        try:
+            doc_texts = [doc.content for doc in documents]
+            results = self._call_rerank(query, doc_texts)
+            scored: list[AgnoDocument] = []
+            for r in results:
+                idx = r.get("index", 0)
+                if idx < len(documents):
+                    doc = documents[idx]
+                    doc.reranking_score = r.get("relevance_score", 0)
+                    scored.append(doc)
+            scored.sort(
+                key=lambda x: x.reranking_score if x.reranking_score is not None else float("-inf"),
+                reverse=True,
+            )
+            return scored[:self.top_n] if self.top_n else scored
+        except Exception as e:
+            print(f"[WARN] Reranker 调用失败，返回原始文档: {e}")
+            return documents
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 知识库 (动态 Embedder + Reranker)
+# ═══════════════════════════════════════════════════════════════════════════════
 
 from agno.vectordb.search import SearchType
 
-_vector_db = LanceDb(
-    uri=str(BASE_DIR / "data" / "lancedb"),
-    table_name="knowledge",
-    embedder=_embedder,
-    search_type=SearchType.hybrid,
-)
+_knowledge: Knowledge | None = None
+_vector_db: LanceDb | None = None
 
-_knowledge = Knowledge(
-    vector_db=_vector_db,
-    max_results=10,
-)
 
-print("[KNOWLEDGE] Agno Knowledge + LanceDb + FastEmbed 初始化完成")
+def _rebuild_knowledge():
+    """根据 settings 配置动态重建 Knowledge（embedder + reranker）。"""
+    global _knowledge, _vector_db
+
+    emb_cfg = _get_embedding_config()
+    rer_cfg = _get_reranker_config()
+
+    if emb_cfg["mode"] == "api" and emb_cfg["model_id"]:
+        from agno.knowledge.embedder.openai import OpenAIEmbedder
+        emb_kwargs: dict = {"id": emb_cfg["model_id"]}
+        if emb_cfg["dimensions"]:
+            emb_kwargs["dimensions"] = emb_cfg["dimensions"]
+        if emb_cfg["api_key"]:
+            emb_kwargs["api_key"] = emb_cfg["api_key"]
+        if emb_cfg["base_url"]:
+            emb_kwargs["base_url"] = emb_cfg["base_url"]
+        embedder = OpenAIEmbedder(**emb_kwargs)
+        print(f"[KNOWLEDGE] 使用远程 Embedding: {emb_cfg['model_id']} @ {emb_cfg['base_url'] or 'default'}")
+    else:
+        embedder = FastEmbedEmbedder(id="BAAI/bge-small-zh-v1.5", dimensions=512)
+        print("[KNOWLEDGE] 使用本地 FastEmbed: BAAI/bge-small-zh-v1.5")
+
+    reranker = None
+    if rer_cfg["enabled"] and rer_cfg["model_id"]:
+        reranker = OpenAICompatibleReranker(
+            model=rer_cfg["model_id"],
+            api_key=rer_cfg["api_key"],
+            base_url=rer_cfg["base_url"],
+            top_n=rer_cfg["top_n"],
+        )
+        print(f"[KNOWLEDGE] 使用 Reranker: {rer_cfg['model_id']} @ {rer_cfg['base_url'] or 'default'}")
+    else:
+        print("[KNOWLEDGE] Reranker 未启用")
+
+    _vector_db = LanceDb(
+        uri=str(BASE_DIR / "data" / "lancedb"),
+        table_name="knowledge",
+        embedder=embedder,
+        search_type=SearchType.hybrid,
+        reranker=reranker,
+    )
+
+    _knowledge = Knowledge(
+        vector_db=_vector_db,
+        max_results=10,
+    )
+    print("[KNOWLEDGE] Knowledge 初始化完成")
+
+
+_rebuild_knowledge()
 
 
 def ingest_document(doc_name: str, text: str) -> int:
@@ -904,6 +1074,181 @@ async def api_test_llm_connection(req: LLMSettingsRequest):
         if any(kw in content_lower for kw in error_keywords) or not content:
             return {"ok": False, "message": f"认证失败，模型返回: {content[:200]}"}
         return {"ok": True, "message": f"连接成功，模型响应: {content[:100]}"}
+    except Exception as e:
+        return {"ok": False, "message": f"连接失败: {str(e)[:200]}"}
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 路由：Embedding 配置
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class EmbeddingSettingsRequest(BaseModel):
+    mode: str = "local"
+    model_id: str = ""
+    api_key: str = ""
+    base_url: str = ""
+    dimensions: int = 1024
+
+
+def _mask_key(key: str) -> str:
+    if not key or len(key) <= 8:
+        return key
+    return key[:4] + "..." + key[-4:]
+
+
+@app.get("/api/settings/embedding")
+async def api_get_embedding_settings():
+    cfg = _get_embedding_config()
+    cfg["api_key"] = _mask_key(cfg["api_key"])
+    return cfg
+
+
+@app.put("/api/settings/embedding")
+async def api_save_embedding_settings(req: EmbeddingSettingsRequest):
+    now = datetime.now(timezone.utc).isoformat()
+    conn = _get_projects_conn()
+
+    api_key = req.api_key
+    if "..." in api_key:
+        existing = conn.execute(
+            "SELECT value FROM settings WHERE key = 'embedding_api_key'"
+        ).fetchone()
+        if existing:
+            api_key = existing["value"]
+        else:
+            api_key = _get_embedding_config()["api_key"]
+
+    if req.mode == "local":
+        for k in ["embedding_model_id", "embedding_api_key", "embedding_base_url", "embedding_dimensions"]:
+            conn.execute("DELETE FROM settings WHERE key = ?", (k,))
+    else:
+        pairs = {
+            "embedding_model_id": req.model_id,
+            "embedding_api_key": api_key,
+            "embedding_base_url": req.base_url,
+            "embedding_dimensions": str(req.dimensions),
+        }
+        for k, v in pairs.items():
+            conn.execute(
+                "INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?) "
+                "ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+                (k, v, now),
+            )
+    conn.commit()
+    conn.close()
+
+    _rebuild_knowledge()
+    _agents.clear()
+    _teams.clear()
+    return {"success": True, "warning": "切换 Embedding 模型后，建议重新上传文档以重建索引。"}
+
+
+@app.post("/api/settings/embedding/test")
+async def api_test_embedding_connection(req: EmbeddingSettingsRequest):
+    """调用 /v1/embeddings 测试 Embedding 模型连通性。"""
+    api_key = req.api_key
+    if "..." in api_key:
+        api_key = _get_embedding_config()["api_key"]
+
+    if req.mode == "local":
+        return {"ok": True, "message": "本地 FastEmbed 模式，无需测试连通性。"}
+
+    try:
+        from openai import OpenAI
+        client = OpenAI(
+            api_key=api_key or "none",
+            base_url=req.base_url,
+            timeout=15,
+        )
+        resp = client.embeddings.create(
+            model=req.model_id,
+            input=["测试连通性"],
+        )
+        dim = len(resp.data[0].embedding)
+        return {"ok": True, "message": f"连接成功，返回向量维度: {dim}"}
+    except Exception as e:
+        return {"ok": False, "message": f"连接失败: {str(e)[:200]}"}
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 路由：Reranker 配置
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class RerankerSettingsRequest(BaseModel):
+    enabled: bool = False
+    model_id: str = ""
+    api_key: str = ""
+    base_url: str = ""
+    top_n: int = 5
+
+
+@app.get("/api/settings/reranker")
+async def api_get_reranker_settings():
+    cfg = _get_reranker_config()
+    cfg["api_key"] = _mask_key(cfg["api_key"])
+    return cfg
+
+
+@app.put("/api/settings/reranker")
+async def api_save_reranker_settings(req: RerankerSettingsRequest):
+    now = datetime.now(timezone.utc).isoformat()
+    conn = _get_projects_conn()
+
+    api_key = req.api_key
+    if "..." in api_key:
+        existing = conn.execute(
+            "SELECT value FROM settings WHERE key = 'reranker_api_key'"
+        ).fetchone()
+        if existing:
+            api_key = existing["value"]
+        else:
+            api_key = _get_reranker_config()["api_key"]
+
+    pairs = {
+        "reranker_enabled": str(req.enabled).lower(),
+        "reranker_model_id": req.model_id,
+        "reranker_api_key": api_key,
+        "reranker_base_url": req.base_url,
+        "reranker_top_n": str(req.top_n),
+    }
+    for k, v in pairs.items():
+        conn.execute(
+            "INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+            (k, v, now),
+        )
+    conn.commit()
+    conn.close()
+
+    _rebuild_knowledge()
+    _agents.clear()
+    _teams.clear()
+    return {"success": True}
+
+
+@app.post("/api/settings/reranker/test")
+async def api_test_reranker_connection(req: RerankerSettingsRequest):
+    """调用 rerank API 测试 Reranker 连通性。"""
+    api_key = req.api_key
+    if "..." in api_key:
+        api_key = _get_reranker_config()["api_key"]
+
+    if not req.enabled:
+        return {"ok": True, "message": "Reranker 未启用，无需测试。"}
+
+    try:
+        reranker = OpenAICompatibleReranker(
+            model=req.model_id,
+            api_key=api_key,
+            base_url=req.base_url,
+            top_n=req.top_n,
+        )
+        test_docs = ["人工智能是计算机科学的分支", "今天天气很好适合出去玩", "深度学习需要大量训练数据"]
+        results = reranker._call_rerank("什么是人工智能", test_docs)
+        if results:
+            top = results[0]
+            return {"ok": True, "message": f"连接成功，返回 {len(results)} 条排序结果，最高分: {top.get('relevance_score', 'N/A')}"}
+        return {"ok": False, "message": "连接成功但返回结果为空"}
     except Exception as e:
         return {"ok": False, "message": f"连接失败: {str(e)[:200]}"}
 

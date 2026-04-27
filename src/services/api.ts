@@ -476,3 +476,75 @@ export async function testLLMConnection(settings: {
   });
   return res.json();
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Embedding 配置管理
+// ═══════════════════════════════════════════════════════════════════════════════
+
+export interface EmbeddingSettings {
+  mode: string;
+  model_id: string;
+  api_key: string;
+  base_url: string;
+  dimensions: number;
+}
+
+export async function fetchEmbeddingSettings(): Promise<EmbeddingSettings> {
+  const res = await fetch(`${API_BASE}/api/settings/embedding`);
+  if (!res.ok) throw new Error('获取 Embedding 配置失败');
+  return res.json();
+}
+
+export async function saveEmbeddingSettings(settings: EmbeddingSettings): Promise<{ success: boolean; warning?: string }> {
+  const res = await fetch(`${API_BASE}/api/settings/embedding`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(settings),
+  });
+  return res.json();
+}
+
+export async function testEmbeddingConnection(settings: EmbeddingSettings): Promise<LLMTestResult> {
+  const res = await fetch(`${API_BASE}/api/settings/embedding/test`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(settings),
+  });
+  return res.json();
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Reranker 配置管理
+// ═══════════════════════════════════════════════════════════════════════════════
+
+export interface RerankerSettings {
+  enabled: boolean;
+  model_id: string;
+  api_key: string;
+  base_url: string;
+  top_n: number;
+}
+
+export async function fetchRerankerSettings(): Promise<RerankerSettings> {
+  const res = await fetch(`${API_BASE}/api/settings/reranker`);
+  if (!res.ok) throw new Error('获取 Reranker 配置失败');
+  return res.json();
+}
+
+export async function saveRerankerSettings(settings: RerankerSettings): Promise<{ success: boolean }> {
+  const res = await fetch(`${API_BASE}/api/settings/reranker`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(settings),
+  });
+  return res.json();
+}
+
+export async function testRerankerConnection(settings: RerankerSettings): Promise<LLMTestResult> {
+  const res = await fetch(`${API_BASE}/api/settings/reranker/test`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(settings),
+  });
+  return res.json();
+}

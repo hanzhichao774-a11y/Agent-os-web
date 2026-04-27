@@ -4,6 +4,25 @@
 
 ---
 
+## [2026-04-27] Embedding / Reranker 配置管理
+
+### 新增
+- **SettingsModal 三 Tab 改造**：模型配置弹窗新增「Embedding」和「Reranker」两个独立 Tab，各自独立配置、测试、保存
+- **Embedding 配置**：支持「本地 FastEmbed」和「远程 API (OpenAI 兼容)」两种模式切换；远程模式可配置 Model ID、API Key、Base URL、向量维度
+- **Reranker 配置**：支持启用/禁用开关；启用后可配置 Model ID、API Key、Base URL、Top N
+- **OpenAICompatibleReranker 类**：自定义 Reranker 实现，自动兼容 Jina/Cohere (`/v1/rerank`) 和 TEI (`/rerank`) 两种 API 格式
+- **知识库动态重建**（`_rebuild_knowledge()`）：替代原来的模块级硬编码初始化，保存 Embedding/Reranker 配置后自动重建 Knowledge 实例
+- **后端 API 端点**：新增 `GET/PUT /api/settings/embedding`、`POST /api/settings/embedding/test`、`GET/PUT /api/settings/reranker`、`POST /api/settings/reranker/test` 共 6 个端点
+- **预检脚本扩展**：`preflight_check.py` 新增 `--embedding-models` 和 `--reranker-models` 参数，支持 Embedding 向量测试和 Reranker 排序测试
+- **.env 模板**：新增 `EMBEDDING_*` 和 `RERANKER_*` 环境变量注释模板
+
+### 技术说明
+- Embedding 切换后需重新上传文档（不同模型向量维度不同，需重建索引），保存时会提示用户
+- Reranker 挂载到 LanceDb 的 `reranker` 参数，检索时自动对结果二次排序
+- 配置优先级：DB settings 表 > `.env` 环境变量 > 默认值（本地 FastEmbed / Reranker 禁用）
+
+---
+
 ## [2026-04-27] LLM 模型配置管理 + 连通性预检
 
 ### 新增

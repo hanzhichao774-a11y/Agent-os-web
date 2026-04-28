@@ -44,6 +44,7 @@ AGENT_CONFIGS: dict[str, dict] = {
         "description": "系统管理智能体，负责任务编排、资源查询、技能管理、项目管理",
         "capabilities": ["任务编排", "资源查询", "技能管理", "项目管理", "计算器", "PDF报告", "图表生成", "Excel导出"],
         "builtin_tools": ["calculator", "pdf", "chart", "excel"],
+        "has_knowledge": True,
         "instructions": [
             "你是「BizAgent」，系统中的管理智能体，负责接收用户任务并编排 SubAgent 执行。",
             "",

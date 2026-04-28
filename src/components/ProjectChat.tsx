@@ -433,7 +433,7 @@ export default function ProjectChat({ projectId, taskId, projectName, projectDes
         {messages.map((msg) => {
           if (msg.role === 'plan') {
             return (
-              <div key={msg.id} className="flex justify-center">
+              <div key={msg.id} className="flex justify-start">
                 <div className="bg-blue-50 dark:bg-blue-500/10 border border-blue-200 dark:border-blue-500/30 rounded-lg px-4 py-2 max-w-lg">
                   <div className="flex items-center gap-2 text-xs text-blue-600 dark:text-blue-400 font-medium mb-1">
                     <Cpu className="w-3.5 h-3.5" /> 任务规划

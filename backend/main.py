@@ -20,6 +20,7 @@ from routes.knowledge_api import router as knowledge_router
 from routes.stats import router as stats_router
 from routes.workflows import router as workflows_router
 from routes.workers import router as workers_router
+from routes.entity_api import router as entity_router
 
 app.include_router(settings_router)
 app.include_router(sessions_router)
@@ -31,3 +32,4 @@ app.include_router(knowledge_router)
 app.include_router(stats_router)
 app.include_router(workflows_router)
 app.include_router(workers_router)
+app.include_router(entity_router)

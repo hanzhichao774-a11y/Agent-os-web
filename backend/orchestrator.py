@@ -59,6 +59,16 @@ CAPABILITY_REGISTRY: dict[str, dict] = {
         "description": "调用外部 HTTP API（GET/POST/PUT/DELETE）",
         "builtin_tools": ["http"],
     },
+    "entity_extraction": {
+        "label": "实体抽取",
+        "description": "从文档或文本中抽取知识实体和关系，构建知识图谱",
+        "builtin_tools": ["entity_extract"],
+    },
+    "entity_management": {
+        "label": "实体管理",
+        "description": "管理知识图谱中的实体：排除、删除不需要的实体",
+        "builtin_tools": ["entity_manage"],
+    },
 }
 
 

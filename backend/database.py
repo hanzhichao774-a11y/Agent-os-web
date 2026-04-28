@@ -64,6 +64,35 @@ def _init_projects_db():
         )
     """)
     conn.execute("CREATE INDEX IF NOT EXISTS idx_task_files_task ON task_files(project_id, task_id)")
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS entities (
+            id TEXT PRIMARY KEY,
+            project_id TEXT NOT NULL,
+            task_id TEXT,
+            name TEXT NOT NULL,
+            type TEXT NOT NULL,
+            description TEXT DEFAULT '',
+            source TEXT DEFAULT '',
+            excluded INTEGER DEFAULT 0,
+            created_at REAL DEFAULT (unixepoch())
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_entities_project ON entities(project_id, task_id)")
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS entity_relations (
+            id TEXT PRIMARY KEY,
+            project_id TEXT NOT NULL,
+            task_id TEXT,
+            source_entity_id TEXT NOT NULL,
+            target_entity_id TEXT NOT NULL,
+            relation TEXT NOT NULL,
+            source TEXT DEFAULT '',
+            created_at REAL DEFAULT (unixepoch()),
+            FOREIGN KEY (source_entity_id) REFERENCES entities(id),
+            FOREIGN KEY (target_entity_id) REFERENCES entities(id)
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_entity_relations_project ON entity_relations(project_id, task_id)")
     conn.commit()
     count = conn.execute("SELECT COUNT(*) FROM projects").fetchone()[0]
     if count == 0:

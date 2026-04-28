@@ -10,7 +10,7 @@ from agno.tools.file_generation import FileGenerationTools
 from agno.tools.python import PythonTools
 from agno.tools.calculator import CalculatorTools
 
-from config import BASE_DIR, WORKSPACE_DIR, SESSIONS_DB
+from config import BASE_DIR, WORKSPACE_DIR, SESSIONS_DB, KNOWLEDGE_DOCS_DIR
 from llm import create_model
 from skill_manager import _skill_registry
 from builtin_tools import (
@@ -153,6 +153,58 @@ _agents: dict[str, Agent] = {}
 
 def _make_builtin_tools(tool_names: list[str]) -> list:
     """根据工具名称列表实例化 Agno 内置 Toolkit 或自定义工具函数。"""
+    from entity_extractor import extract_entities_sync, exclude_entity_by_name
+    from context import current_project_id, current_task_id
+    from doc_parser import read_document_text
+
+    def _entity_extract_from_knowledge(doc_name: str = "") -> str:
+        """从知识库文档中抽取实体和关系，构建知识图谱。doc_name 可选，为空则扫描所有文档。"""
+        proj_id = current_project_id.get()
+        task_id = current_task_id.get()
+        if not proj_id:
+            return "错误：无法获取当前项目上下文"
+
+        docs_dir = KNOWLEDGE_DOCS_DIR
+        if not docs_dir.exists():
+            return "知识库文档目录不存在"
+
+        files = []
+        if doc_name:
+            target = docs_dir / doc_name
+            if target.exists():
+                files = [target]
+            else:
+                return f"文档「{doc_name}」不存在"
+        else:
+            files = [f for f in docs_dir.iterdir() if f.is_file() and not f.name.startswith(".")]
+
+        if not files:
+            return "知识库中暂无文档"
+
+        total_ents = 0
+        total_rels = 0
+        for fpath in files:
+            text = read_document_text(fpath)
+            if not text.strip():
+                continue
+            text = text[:8000]
+            try:
+                result = extract_entities_sync(text, proj_id, task_id, fpath.name)
+                total_ents += result.get("entities_count", 0)
+                total_rels += result.get("relations_count", 0)
+                print(f"[ENTITY] 抽取成功 {fpath.name}: {result.get('entities_count', 0)} 实体")
+            except Exception as e:
+                print(f"[ENTITY] 抽取失败 {fpath.name}: {e}")
+
+        return f"实体抽取完成：从 {len(files)} 个文档中提取了 {total_ents} 个实体和 {total_rels} 条关系，已保存到知识图谱。"
+
+    def _entity_exclude_tool(entity_name: str) -> str:
+        """将指定名称的实体标记为排除，不再在图谱中显示。entity_name: 要排除的实体名称"""
+        proj_id = current_project_id.get()
+        if not proj_id:
+            return "错误：无法获取当前项目上下文"
+        return exclude_entity_by_name(proj_id, entity_name)
+
     factories = {
         "pandas": lambda: PandasTools(),
         "duckdb": lambda: DuckDbTools(db_path=str(WORKSPACE_DIR / "duckdb.db")),
@@ -167,6 +219,8 @@ def _make_builtin_tools(tool_names: list[str]) -> list:
         "image": lambda: process_image,
         "http": lambda: http_request,
         "_knowledge_list": lambda: list_knowledge_documents,
+        "entity_extract": lambda: _entity_extract_from_knowledge,
+        "entity_manage": lambda: _entity_exclude_tool,
     }
     tools = []
     for name in tool_names:
@@ -267,11 +321,26 @@ def create_dynamic_agent(
     unique_tools = list(dict.fromkeys(all_builtin_names))
     tools = _make_builtin_tools(unique_tools) + skill_tools
 
+    tool_hints = []
+    for cap in capabilities:
+        if cap == "entity_extraction":
+            tool_hints.append("- 你有一个 `_entity_extract_from_knowledge` 工具，直接调用即可从知识库文档抽取实体，无需手动传参。")
+        elif cap == "entity_management":
+            tool_hints.append("- 你有一个 `_entity_exclude_tool` 工具，传入要排除的实体名称即可。")
+
     instructions = [
         f"你是 SubAgent #{slot_id}，正在执行以下任务：",
         f"「{task_description}」",
         "",
         "请专注完成任务并给出清晰的结果。",
+        "**重要：你必须使用提供的工具来完成任务，不要只用文字回答。**",
+    ]
+    if tool_hints:
+        instructions.append("")
+        instructions.append("## 可用工具说明")
+        instructions.extend(tool_hints)
+
+    instructions.extend([
         "",
         "## 输出格式要求（重要！）",
         "如果生成了文件，必须按以下格式输出：",
@@ -281,7 +350,7 @@ def create_dynamic_agent(
         "- PDF content 不要包含 emoji 符号",
         "",
         "始终使用中文回答。",
-    ]
+    ])
 
     kwargs = {}
     if needs_knowledge:

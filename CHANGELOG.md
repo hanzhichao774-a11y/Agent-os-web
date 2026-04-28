@@ -4,6 +4,68 @@
 
 ---
 
+## [2026-04-28] 知识图谱实体抽取与下钻式可视化
+
+### 功能概述
+
+新增知识图谱模块：上传文档自动抽取实体和关系，右侧面板「图谱」tab 展示可交互的力导向图，支持逐级下钻探索。
+
+### 迭代过程与问题复盘
+
+本功能经历了 **4 轮迭代**，主要遭遇以下技术障碍：
+
+**第 1 轮：实体抽取不生效**
+- 原因 1：`entity_extractor.py` 最初使用 `Agent.arun()`（异步），在 `asyncio.to_thread` 的线程中调用会触发「There is no current event loop in thread」错误。修复：改为 `Agent.run()` 同步调用。
+- 原因 2：知识库文档解析直接用 `fpath.read_text()` 读取 PDF/DOCX 二进制文件，得到乱码。修复：抽取出 `doc_parser.py` 统一处理 PDF（fitz）、DOCX（python-docx）、XLSX（openpyxl）、CSV、纯文本。
+- 原因 3：Agno 框架的 `Function.from_callable` 对 Qwen 模型的 function calling 支持不稳定，SubAgent 经常不调用工具。修复：引入「直接执行路径」——对实体抽取类请求绕过 SubAgent 编排，直接调用 `extract_entities_sync`。
+
+**第 2 轮：图谱渲染崩溃**
+- 原因：ForceGraph 组件对全部 85+ 个实体做 O(N²) 力模拟（800 次迭代），浏览器在初始布局阶段直接卡死。同时 `requestAnimationFrame` 循环在数据为空时退出后不会重启。
+- 修复：优化力模拟迭代次数、跳过远距离节点、用 Map 替代 Array.find。但即使优化后，全量渲染仍然不可行。
+
+**第 3 轮：架构重设计 — 下钻探索模式**
+- 核心问题：企业知识库会持续增长，全量平铺图谱从根本上不可行。
+- 新设计：初始只展示 Top 10 核心节点（按关联度排序），用户单击展开一度关联、双击收起，逐级探索。
+- 新增 `/api/entities/{pid}/top` 和 `/api/entities/{pid}/expand/{eid}` 两个后端 API。
+
+**第 4 轮：端到端不通**
+- 原因 1：后端代码已更新但 uvicorn 未重启，`/top` 路由返回 404（日志中出现 30+ 次 404）。
+- 原因 2：用户说「生产实体」但直接抽取关键词列表只有「提取实体」「抽取实体」等，不匹配。请求走了普通编排路径，BizAgent 只是文本描述了实体但未写入数据库。
+- 原因 3：85 个实体 `task_id=NULL`（早期抽取），按 task 过滤查不到。`_upsert_entities` 更新已有实体时不更新 task_id。
+- 修复：扩展关键词列表、增加 task→project 回退查询、upsert 时补填 task_id。
+
+### 新增
+
+- **`backend/entity_extractor.py`**：LLM 驱动的实体抽取引擎
+  - `extract_entities_sync()`：同步版本，用于直接执行路径和 SubAgent 工具
+  - `extract_entities()`：异步版本，用于文件上传后的后台自动抽取
+  - `get_top_entities()`：按关联度排序返回 Top N 核心实体，支持 task→project 回退
+  - `get_entity_neighbors()`：获取某实体的一度关联
+  - `_upsert_entities()`：按 name 去重的实体写入，自动补填 NULL task_id
+- **`backend/doc_parser.py`**：统一文档文本提取工具（PDF/DOCX/XLSX/CSV/TXT）
+- **`backend/routes/entity_api.py`**：实体 CRUD + 图谱 API
+  - `GET /api/entities/{pid}/top`：顶层核心节点（支持 task_id、limit 参数）
+  - `GET /api/entities/{pid}/expand/{eid}`：展开一度关联
+  - `GET /api/entities/{pid}/graph`：全量图（保留兼容）
+  - `PUT /api/entities/item/{eid}/exclude`：排除/恢复实体
+  - `DELETE /api/entities/item/{eid}`：删除实体
+- **`src/components/ForceGraph.tsx`**：Canvas 力导向图组件
+  - 增量式布局：新节点从父节点附近生成，短迭代快速收敛
+  - 单击/双击回调，已展开节点外圈光环，可展开节点 "+" 标记
+  - 拖拽不误触发点击
+- **数据库 schema**：`entities` 表（id, project_id, task_id, name, type, description, source, excluded）+ `entity_relations` 表
+- **文件上传自动抽取**：`knowledge_api.py` 上传文档后 `asyncio.create_task` 后台抽取实体
+- **直接执行路径**：`chat.py` 中实体抽取请求绕过 SubAgent 编排，直接执行写入
+
+### 优化
+
+- **RightPanel「图谱」tab**：重写为下钻探索模式，左侧标签云同步显示当前可见实体
+- **BizAgent 编排关键词**：增加实体/图谱相关触发词
+- **`_DIRECT_ENTITY_KEYWORDS`**：覆盖"生产实体""生成实体""知识图谱"等 12 种用户表达
+- **BizAgent 汇总隔离**：使用独立 session_id 防止上下文污染
+
+---
+
 ## [2026-04-28] 动态编排架构 — 去除固定数字员工，SubAgent 工位制
 
 ### 架构重构

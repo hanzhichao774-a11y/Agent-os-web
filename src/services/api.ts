@@ -628,3 +628,77 @@ export async function fetchSessionMessages(sessionId: string): Promise<HistoryMe
   if (!res.ok) return [];
   return res.json();
 }
+
+// ---------------------------------------------------------------------------
+// Entity / Knowledge Graph
+// ---------------------------------------------------------------------------
+
+export interface EntityNode {
+  id: string;
+  name: string;
+  type: string;
+  description: string;
+  source: string;
+  excluded: boolean;
+}
+
+export interface EntityRelation {
+  id: string;
+  source_entity_id: string;
+  target_entity_id: string;
+  relation: string;
+}
+
+export interface EntityGraphData {
+  entities: EntityNode[];
+  relations: EntityRelation[];
+}
+
+export interface TopEntitiesData {
+  entities: EntityNode[];
+  relations: EntityRelation[];
+  total_entities: number;
+  total_relations: number;
+}
+
+export async function fetchEntityGraph(projectId: string, taskId?: string | null): Promise<EntityGraphData> {
+  const params = new URLSearchParams();
+  if (taskId) params.set('task_id', taskId);
+  const qs = params.toString();
+  const res = await fetch(`${API_BASE}/api/entities/${projectId}/graph${qs ? `?${qs}` : ''}`);
+  if (!res.ok) return { entities: [], relations: [] };
+  return res.json();
+}
+
+export async function fetchTopEntities(
+  projectId: string,
+  taskId?: string | null,
+  limit: number = 10,
+): Promise<TopEntitiesData> {
+  const params = new URLSearchParams();
+  if (taskId) params.set('task_id', taskId);
+  params.set('limit', String(limit));
+  const qs = params.toString();
+  const res = await fetch(`${API_BASE}/api/entities/${projectId}/top?${qs}`);
+  if (!res.ok) return { entities: [], relations: [], total_entities: 0, total_relations: 0 };
+  return res.json();
+}
+
+export async function expandEntity(
+  projectId: string,
+  entityId: string,
+): Promise<EntityGraphData> {
+  const res = await fetch(`${API_BASE}/api/entities/${projectId}/expand/${encodeURIComponent(entityId)}`);
+  if (!res.ok) return { entities: [], relations: [] };
+  return res.json();
+}
+
+export async function excludeEntity(entityId: string, exclude: boolean = true): Promise<{ success: boolean }> {
+  const res = await fetch(`${API_BASE}/api/entities/item/${entityId}/exclude?exclude=${exclude}`, { method: 'PUT' });
+  return res.json();
+}
+
+export async function deleteEntity(entityId: string): Promise<{ success: boolean }> {
+  const res = await fetch(`${API_BASE}/api/entities/item/${entityId}`, { method: 'DELETE' });
+  return res.json();
+}

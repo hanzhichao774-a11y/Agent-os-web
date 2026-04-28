@@ -1,4 +1,5 @@
 import io
+import asyncio
 from pathlib import Path
 from typing import Optional
 
@@ -99,6 +100,18 @@ async def api_upload_document(
         invalidate_agent("a2")
         if project_id:
             register_task_file(project_id, task_id, doc_name, "upload", "knowledge")
+
+        # Async entity extraction (fire-and-forget)
+        if project_id:
+            async def _bg_extract():
+                try:
+                    from entity_extractor import extract_entities
+                    result = await extract_entities(text, project_id, task_id, doc_name)
+                    print(f"[ENTITY] 自动抽取完成: {doc_name} -> {result.get('entities_count', 0)} 实体, {result.get('relations_count', 0)} 关系")
+                except Exception as ex:
+                    print(f"[ENTITY] 自动抽取失败: {doc_name} -> {ex}")
+            asyncio.create_task(_bg_extract())
+
         return {"success": True, "doc_name": doc_name, "chunks": chunk_count}
     except Exception as e:
         _uploaded_docs[doc_name] = -1

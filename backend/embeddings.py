@@ -9,20 +9,24 @@ from database import _get_projects_conn
 
 def _get_embedding_config() -> dict:
     """从 DB 读取 Embedding 配置，无则回退到 .env。"""
-    conn = _get_projects_conn()
-    rows = conn.execute(
-        "SELECT key, value FROM settings WHERE key LIKE 'embedding_%'"
-    ).fetchall()
-    conn.close()
-    db_cfg = {r["key"]: r["value"] for r in rows}
-    if db_cfg.get("embedding_model_id"):
-        return {
-            "mode": "api",
-            "model_id": db_cfg["embedding_model_id"],
-            "api_key": db_cfg.get("embedding_api_key", ""),
-            "base_url": db_cfg.get("embedding_base_url", ""),
-            "dimensions": int(db_cfg.get("embedding_dimensions", "1024")),
-        }
+    try:
+        conn = _get_projects_conn()
+        rows = conn.execute(
+            "SELECT key, value FROM settings WHERE key LIKE 'embedding_%'"
+        ).fetchall()
+        conn.close()
+        db_cfg = {r["key"]: r["value"] for r in rows}
+        if db_cfg.get("embedding_model_id"):
+            return {
+                "mode": "api",
+                "model_id": db_cfg["embedding_model_id"],
+                "api_key": db_cfg.get("embedding_api_key", ""),
+                "base_url": db_cfg.get("embedding_base_url", ""),
+                "dimensions": int(db_cfg.get("embedding_dimensions", "1024")),
+            }
+    except Exception as e:
+        print(f"[WARN] 读取 Embedding DB 配置失败，使用默认值: {e}")
+
     env_model = os.getenv("EMBEDDING_MODEL_ID", "")
     if env_model:
         return {
@@ -37,20 +41,24 @@ def _get_embedding_config() -> dict:
 
 def _get_reranker_config() -> dict:
     """从 DB 读取 Reranker 配置，无则回退到 .env。"""
-    conn = _get_projects_conn()
-    rows = conn.execute(
-        "SELECT key, value FROM settings WHERE key LIKE 'reranker_%'"
-    ).fetchall()
-    conn.close()
-    db_cfg = {r["key"]: r["value"] for r in rows}
-    if db_cfg.get("reranker_model_id"):
-        return {
-            "enabled": db_cfg.get("reranker_enabled", "true").lower() == "true",
-            "model_id": db_cfg["reranker_model_id"],
-            "api_key": db_cfg.get("reranker_api_key", ""),
-            "base_url": db_cfg.get("reranker_base_url", ""),
-            "top_n": int(db_cfg.get("reranker_top_n", "5")),
-        }
+    try:
+        conn = _get_projects_conn()
+        rows = conn.execute(
+            "SELECT key, value FROM settings WHERE key LIKE 'reranker_%'"
+        ).fetchall()
+        conn.close()
+        db_cfg = {r["key"]: r["value"] for r in rows}
+        if db_cfg.get("reranker_model_id"):
+            return {
+                "enabled": db_cfg.get("reranker_enabled", "true").lower() == "true",
+                "model_id": db_cfg["reranker_model_id"],
+                "api_key": db_cfg.get("reranker_api_key", ""),
+                "base_url": db_cfg.get("reranker_base_url", ""),
+                "top_n": int(db_cfg.get("reranker_top_n", "5")),
+            }
+    except Exception as e:
+        print(f"[WARN] 读取 Reranker DB 配置失败，使用默认值: {e}")
+
     env_model = os.getenv("RERANKER_MODEL_ID", "")
     if env_model:
         return {

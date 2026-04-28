@@ -200,11 +200,14 @@ def get_agent(agent_id: str) -> Agent | None:
 
         kwargs = {}
         if config.get("has_knowledge"):
-            from knowledge import _knowledge
-            kwargs["knowledge"] = _knowledge
-            kwargs["add_knowledge_to_context"] = True
-            kwargs["search_knowledge"] = True
-            kwargs["enable_agentic_knowledge_filters"] = True
+            from knowledge import _knowledge, knowledge_available
+            if knowledge_available():
+                kwargs["knowledge"] = _knowledge
+                kwargs["add_knowledge_to_context"] = True
+                kwargs["search_knowledge"] = True
+                kwargs["enable_agentic_knowledge_filters"] = True
+            else:
+                print(f"[WARN] Agent {agent_id} 请求知识库但知识库不可用，跳过注入")
 
         agent = Agent(
             name=config["name"],
@@ -281,11 +284,14 @@ def create_dynamic_agent(
 
     kwargs = {}
     if needs_knowledge:
-        from knowledge import _knowledge
-        kwargs["knowledge"] = _knowledge
-        kwargs["add_knowledge_to_context"] = True
-        kwargs["search_knowledge"] = True
-        kwargs["enable_agentic_knowledge_filters"] = True
+        from knowledge import _knowledge, knowledge_available
+        if knowledge_available():
+            kwargs["knowledge"] = _knowledge
+            kwargs["add_knowledge_to_context"] = True
+            kwargs["search_knowledge"] = True
+            kwargs["enable_agentic_knowledge_filters"] = True
+        else:
+            print(f"[WARN] SubAgent-{slot_id} 请求知识库但知识库不可用，跳过注入")
 
     agent = Agent(
         name=f"SubAgent-{slot_id}",

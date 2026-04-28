@@ -64,8 +64,12 @@ CAPABILITY_REGISTRY: dict[str, dict] = {
 
 def get_full_capability_list() -> str:
     """返回给 LLM 的能力清单描述（含动态技能）。"""
+    from knowledge import knowledge_available
+
     lines: list[str] = []
     for cap_id, cap in CAPABILITY_REGISTRY.items():
+        if cap.get("needs_knowledge") and not knowledge_available():
+            continue
         lines.append(f"- {cap_id}: {cap['description']}")
     for sid, skill in _skill_registry.items():
         meta = skill["meta"]

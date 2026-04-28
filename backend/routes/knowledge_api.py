@@ -5,7 +5,7 @@ from typing import Optional
 from fastapi import APIRouter, UploadFile, File, Query
 
 from config import KNOWLEDGE_DOCS_DIR
-from knowledge import ingest_document, _uploaded_docs, list_documents
+from knowledge import ingest_document, _uploaded_docs, list_documents, knowledge_available
 from agents import invalidate_agent
 from database import register_task_file
 
@@ -82,6 +82,17 @@ async def api_upload_document(
     if not text.strip():
         return {"success": False, "error": "文件内容为空，无法解析"}
 
+    if not knowledge_available():
+        _uploaded_docs[doc_name] = -1
+        if project_id:
+            register_task_file(project_id, task_id, doc_name, "upload", "knowledge")
+        return {
+            "success": True,
+            "doc_name": doc_name,
+            "chunks": -1,
+            "warning": "文件已保存，但知识检索功能当前不可用，无法进行向量入库。",
+        }
+
     try:
         chunk_count = ingest_document(doc_name, text)
         _uploaded_docs[doc_name] = chunk_count
@@ -90,7 +101,10 @@ async def api_upload_document(
             register_task_file(project_id, task_id, doc_name, "upload", "knowledge")
         return {"success": True, "doc_name": doc_name, "chunks": chunk_count}
     except Exception as e:
-        return {"success": False, "error": f"解析失败: {e}"}
+        _uploaded_docs[doc_name] = -1
+        if project_id:
+            register_task_file(project_id, task_id, doc_name, "upload", "knowledge")
+        return {"success": False, "error": f"向量入库失败: {e}", "doc_name": doc_name, "warning": "文件已保存到磁盘"}
 
 
 @router.get("/api/knowledge/docs")

@@ -165,9 +165,16 @@ async def api_save_embedding_settings(req: EmbeddingSettingsRequest):
     conn.commit()
     conn.close()
 
-    _rebuild_knowledge()
+    try:
+        _rebuild_knowledge()
+    except Exception as e:
+        print(f"[WARN] 保存 Embedding 后重建知识库失败: {e}")
     _agents.clear()
-    return {"success": True, "warning": "切换 Embedding 模型后，建议重新上传文档以重建索引。"}
+    warning = "切换 Embedding 模型后，建议重新上传文档以重建索引。"
+    from knowledge import knowledge_available
+    if not knowledge_available():
+        warning += " 注意：知识库当前不可用，知识检索功能已暂停。"
+    return {"success": True, "warning": warning}
 
 
 @router.post("/api/settings/embedding/test")
@@ -236,9 +243,16 @@ async def api_save_reranker_settings(req: RerankerSettingsRequest):
     conn.commit()
     conn.close()
 
-    _rebuild_knowledge()
+    try:
+        _rebuild_knowledge()
+    except Exception as e:
+        print(f"[WARN] 保存 Reranker 后重建知识库失败: {e}")
     _agents.clear()
-    return {"success": True}
+    resp: dict = {"success": True}
+    from knowledge import knowledge_available
+    if not knowledge_available():
+        resp["warning"] = "知识库当前不可用，知识检索功能已暂停。"
+    return resp
 
 
 @router.post("/api/settings/reranker/test")

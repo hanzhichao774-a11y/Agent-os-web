@@ -1,19 +1,22 @@
+import os
+
 try:
     from agno.knowledge.knowledge import Knowledge
     from agno.knowledge.embedder.fastembed import FastEmbedEmbedder
     from agno.knowledge.chunking.recursive import RecursiveChunking
-    from agno.vectordb.lancedb import LanceDb
-    from agno.vectordb.search import SearchType
-    _LANCE_AVAILABLE = True
+    from agno.vectordb.pgvector import PgVector, SearchType
+    _VECTORDB_AVAILABLE = True
 except Exception as _import_err:
-    _LANCE_AVAILABLE = False
-    print(f"[KNOWLEDGE] LanceDB/Agno 向量模块导入失败，知识库功能将不可用: {_import_err}")
+    _VECTORDB_AVAILABLE = False
+    print(f"[KNOWLEDGE] PgVector/Agno 向量模块导入失败，知识库功能将不可用: {_import_err}")
 
 from config import BASE_DIR, KNOWLEDGE_DOCS_DIR
 
 _knowledge = None
 _vector_db = None
 _uploaded_docs: dict[str, int] = {}
+
+_DEFAULT_PG_URL = "postgresql+psycopg://ai:ai@localhost:5532/ai"
 
 
 def knowledge_available() -> bool:
@@ -25,8 +28,8 @@ def _rebuild_knowledge():
     """根据 settings 配置动态重建 Knowledge（embedder + reranker）。"""
     global _knowledge, _vector_db
 
-    if not _LANCE_AVAILABLE:
-        print("[KNOWLEDGE] 跳过初始化：LanceDB 模块不可用")
+    if not _VECTORDB_AVAILABLE:
+        print("[KNOWLEDGE] 跳过初始化：PgVector 模块不可用")
         _knowledge = None
         _vector_db = None
         return
@@ -63,19 +66,23 @@ def _rebuild_knowledge():
     else:
         print("[KNOWLEDGE] Reranker 未启用")
 
-    _vector_db = LanceDb(
-        uri=str(BASE_DIR / "data" / "lancedb"),
+    db_url = os.getenv("PGVECTOR_DB_URL", _DEFAULT_PG_URL)
+    print(f"[KNOWLEDGE] 连接 PgVector: {db_url.split('@')[-1] if '@' in db_url else db_url}")
+
+    _vector_db = PgVector(
         table_name="knowledge",
+        db_url=db_url,
         embedder=embedder,
         search_type=SearchType.hybrid,
         reranker=reranker,
+        content_language="simple",
     )
 
     _knowledge = Knowledge(
         vector_db=_vector_db,
         max_results=10,
     )
-    print("[KNOWLEDGE] Knowledge 初始化完成")
+    print("[KNOWLEDGE] Knowledge 初始化完成（PgVector）")
 
 
 try:
@@ -89,7 +96,7 @@ except Exception as _init_err:
 def ingest_document(doc_name: str, text: str) -> int:
     """将文本通过 RecursiveChunking 分块后存入向量库。"""
     if not knowledge_available():
-        raise RuntimeError("知识库功能不可用（LanceDB 初始化失败），无法入库文档")
+        raise RuntimeError("知识库功能不可用（向量数据库初始化失败），无法入库文档")
 
     from agno.knowledge.reader.text_reader import TextReader
     reader = TextReader(

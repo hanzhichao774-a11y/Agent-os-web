@@ -74,7 +74,6 @@ function MarkdownContent({ content }: { content: string }) {
   );
 }
 
-const OUTPUT_TYPE_PATTERN = /已生成\**\s*(柱状图|折线图|饼图|散点图|热力图|雷达图|表格|报告|文档|PPT|PDF|图表)\**[：:]\s*(.+)/g;
 const OUTPUT_FILE_PATTERN = /(?:已生成|文件名称|文件名|文件路径|生成文件)\**[：:\s]+`?(\S+?\.(pdf|xlsx|xls|csv|png|jpg|pptx?|docx?|txt|md))`?/gi;
 
 function parseOutputItems(content: string, msgId: string, agentName?: string, timestamp?: string): OutputItem[] {
@@ -82,17 +81,6 @@ function parseOutputItems(content: string, msgId: string, agentName?: string, ti
   const seen = new Set<string>();
 
   let match: RegExpExecArray | null;
-
-  const typeRe = new RegExp(OUTPUT_TYPE_PATTERN.source, 'g');
-  while ((match = typeRe.exec(content)) !== null) {
-    const type = match[1];
-    const title = match[2].trim();
-    const key = `${type}:${title}`;
-    if (!seen.has(key)) {
-      seen.add(key);
-      items.push({ id: `${msgId}_out_${items.length}`, title, type, agentName, timestamp: timestamp || '' });
-    }
-  }
 
   const fileRe = new RegExp(OUTPUT_FILE_PATTERN.source, 'gi');
   while ((match = fileRe.exec(content)) !== null) {

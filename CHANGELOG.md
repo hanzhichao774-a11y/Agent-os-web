@@ -4,6 +4,35 @@
 
 ---
 
+## [2026-04-28] 任务级文件隔离 + 新文件格式支持 + 知识检索增强
+
+### 新增
+- **任务级文件隔离**：
+  - 新增 `task_files` 数据表，记录每个文件所属的项目和任务
+  - 上传文件和 Agent 产出文件均关联到具体任务，右侧面板按任务维度展示
+  - `contextvars` 线程安全传递 `project_id` / `task_id`，内置工具（PDF/图表/Excel）生成后自动注册到对应任务
+  - 新增 `GET /api/projects/{project_id}/tasks/{task_id}/files` 接口
+- **新文件格式支持**：
+  - `.docx`（Word）：基于 `python-docx` 解析段落和表格内容
+  - `.xlsx` / `.xls`（Excel）：基于 `openpyxl` 解析所有工作表数据
+  - `.csv`：UTF-8 文本直接入库
+- **知识检索 Agent 增强**：新增 `list_knowledge_documents` 工具，支持列举所有已入库文档（不再仅依赖语义搜索）
+- **context.py**：新增 `current_project_id` / `current_task_id` 上下文变量模块
+
+### 优化
+- **UI 布局调整**：项目视图去除独立文件库面板，BizAgent 提升为项目维度侧边栏，与数字员工/技能页布局一致
+- **BizAgent 项目上下文**：BizAgent 在项目视图中自动注入当前项目名称和 ID，支持项目维度问答
+- **前端文件上传**：扩展支持 `.docx` / `.xlsx` / `.xls` / `.csv` 格式
+
+### 修复
+- **移除 PromptInjectionGuardrail**：Agno 内置 prompt injection 检测对中文查询误报率极高，导致正常提问被拦截卡住
+- **FastEmbed 模型缓存损坏**：清除损坏的 ONNX 模型缓存，修复文档向量化静默失败问题
+
+### 依赖
+- 新增 `python-docx>=1.1.0`、`openpyxl>=3.1.0`
+
+---
+
 ## [2026-04-27] 后端模块化拆分 + 内置工具 + 图表/文件交互优化
 
 ### 重构

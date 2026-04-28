@@ -1,12 +1,13 @@
 import { useState, useEffect } from 'react';
 import { Circle, FileText, Network, Download, ExternalLink } from 'lucide-react';
-import { fetchWorkspaceFiles, fetchKnowledgeDocs, getWorkspaceFileUrl } from '../services/api';
-import type { WorkspaceFile } from '../services/api';
+import { fetchTaskFiles, getWorkspaceFileUrl } from '../services/api';
+import type { TaskFile } from '../services/api';
 import type { OutputItem } from '../App';
 
 interface RightPanelProps {
   activeView: string;
   activeProjectId: string | null;
+  activeTaskId: string | null;
   teamAgents: unknown[];
   teamSteps: unknown[];
   outputs: OutputItem[];
@@ -115,34 +116,36 @@ function DataOutputPanel({ outputs }: { outputs: OutputItem[] }) {
   );
 }
 
-function FilesPanel({ outputs }: { outputs: OutputItem[] }) {
-  const [files, setFiles] = useState<WorkspaceFile[]>([]);
-  const [uploadedDocs, setUploadedDocs] = useState<Array<{ doc_name: string; chunks: number }>>([]);
+function FilesPanel({ outputs, projectId, taskId }: { outputs: OutputItem[]; projectId: string; taskId: string | null }) {
+  const [uploadedFiles, setUploadedFiles] = useState<TaskFile[]>([]);
+  const [outputFiles, setOutputFiles] = useState<TaskFile[]>([]);
+
+  const effectiveTaskId = taskId || 'main';
 
   useEffect(() => {
-    fetchWorkspaceFiles().then(setFiles).catch(() => {});
-    fetchKnowledgeDocs().then(setUploadedDocs).catch(() => {});
-  }, []);
+    fetchTaskFiles(projectId, effectiveTaskId, 'upload').then(setUploadedFiles).catch(() => {});
+    fetchTaskFiles(projectId, effectiveTaskId, 'output').then(setOutputFiles).catch(() => {});
+  }, [projectId, effectiveTaskId]);
 
   return (
     <div className="h-full overflow-y-auto px-4 py-4 space-y-6">
-      {/* Uploaded docs (knowledge base) */}
+      {/* Uploaded docs */}
       <div>
         <h4 className="text-xs font-semibold text-text-muted uppercase tracking-wider mb-3">上传文件</h4>
         <div className="space-y-1">
-          {uploadedDocs.length === 0 && (
+          {uploadedFiles.length === 0 && (
             <p className="text-xs text-text-muted py-3 text-center">暂无上传文件</p>
           )}
-          {uploadedDocs.map(doc => {
-            const { ext, colors } = getExtLabel(doc.doc_name);
+          {uploadedFiles.map(f => {
+            const { ext, colors } = getExtLabel(f.file_name);
             return (
-              <div key={doc.doc_name} className="flex items-center gap-3 px-2 py-2.5 rounded-lg hover:bg-bg transition-colors">
+              <div key={f.file_name + f.created_at} className="flex items-center gap-3 px-2 py-2.5 rounded-lg hover:bg-bg transition-colors">
                 <span className={`text-[10px] font-bold px-2 py-1 rounded-md ${colors.bg} ${colors.text} shrink-0 min-w-[40px] text-center`}>
                   {ext}
                 </span>
                 <div className="min-w-0 flex-1">
-                  <p className="text-sm text-text font-medium truncate">{doc.doc_name}</p>
-                  <p className="text-[10px] text-text-muted">{doc.chunks} 个段落</p>
+                  <p className="text-sm text-text font-medium truncate">{f.file_name}</p>
+                  <p className="text-[10px] text-text-muted">{f.size ? formatSize(f.size) : ''}</p>
                 </div>
               </div>
             );
@@ -154,25 +157,25 @@ function FilesPanel({ outputs }: { outputs: OutputItem[] }) {
       <div>
         <h4 className="text-xs font-semibold text-text-muted uppercase tracking-wider mb-3">产出文件</h4>
         <div className="space-y-1">
-          {files.length === 0 ? (
+          {outputFiles.length === 0 ? (
             <p className="text-xs text-text-muted py-3 text-center">暂无产出文件</p>
           ) : (
-            files.map(f => {
-              const { ext, colors } = getExtLabel(f.name);
-              const previewable = isPreviewable(f.name);
+            outputFiles.map(f => {
+              const { ext, colors } = getExtLabel(f.file_name);
+              const previewable = isPreviewable(f.file_name);
               return (
-                <div key={f.name} className="flex items-center gap-3 px-2 py-2.5 rounded-lg hover:bg-bg transition-colors group">
+                <div key={f.file_name + f.created_at} className="flex items-center gap-3 px-2 py-2.5 rounded-lg hover:bg-bg transition-colors group">
                   <span className={`text-[10px] font-bold px-2 py-1 rounded-md ${colors.bg} ${colors.text} shrink-0 min-w-[40px] text-center`}>
                     {ext}
                   </span>
                   <div className="min-w-0 flex-1">
-                    <p className="text-sm text-text font-medium truncate">{f.name}</p>
-                    <p className="text-[10px] text-text-muted">{formatSize(f.size)}</p>
+                    <p className="text-sm text-text font-medium truncate">{f.file_name}</p>
+                    <p className="text-[10px] text-text-muted">{f.size ? formatSize(f.size) : ''}</p>
                   </div>
                   <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
                     {previewable && (
                       <button
-                        onClick={() => window.open(getWorkspaceFileUrl(f.name), '_blank')}
+                        onClick={() => window.open(getWorkspaceFileUrl(f.file_name), '_blank')}
                         className="p-1 rounded hover:bg-border transition-colors"
                         title="预览"
                       >
@@ -180,7 +183,7 @@ function FilesPanel({ outputs }: { outputs: OutputItem[] }) {
                       </button>
                     )}
                     <button
-                      onClick={() => downloadFile(f.name)}
+                      onClick={() => downloadFile(f.file_name)}
                       className="p-1 rounded hover:bg-border transition-colors"
                       title="下载"
                     >
@@ -302,7 +305,7 @@ function KnowledgeGraph() {
   );
 }
 
-export default function RightPanel({ activeView, activeProjectId, outputs }: RightPanelProps) {
+export default function RightPanel({ activeView, activeProjectId, activeTaskId, outputs }: RightPanelProps) {
   const [activeTab, setActiveTab] = useState<TabKey>('data');
 
   const isProjectView = activeView === 'project' && activeProjectId;
@@ -334,7 +337,7 @@ export default function RightPanel({ activeView, activeProjectId, outputs }: Rig
       {/* Tab content */}
       <div className="flex-1 min-h-0 overflow-hidden">
         {activeTab === 'data' && <DataOutputPanel outputs={outputs} />}
-        {activeTab === 'files' && <FilesPanel outputs={outputs} />}
+        {activeTab === 'files' && <FilesPanel outputs={outputs} projectId={activeProjectId!} taskId={activeTaskId} />}
         {activeTab === 'graph' && <KnowledgeGraph />}
       </div>
     </div>

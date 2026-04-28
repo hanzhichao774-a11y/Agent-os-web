@@ -1,5 +1,6 @@
 import json
 import asyncio
+import re
 
 from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
@@ -14,6 +15,7 @@ from teams import get_team
 from llm import _get_llm_config
 from skill_manager import _skill_registry
 from knowledge import list_documents
+from context import current_project_id, current_task_id
 
 router = APIRouter()
 
@@ -87,6 +89,13 @@ async def team_chat(project_id: str, request: ChatRequest):
     chat_session_id = f"team_{project_id}_{request.session_id}"
     collected_member_content: dict[str, list[str]] = {}
     collected_member_names: dict[str, str] = {}
+
+    _task_match = re.search(r"_task_(.+)$", request.session_id)
+    _parsed_task_id = _task_match.group(1) if _task_match else None
+    if _parsed_task_id == "main":
+        _parsed_task_id = None
+    current_project_id.set(project_id)
+    current_task_id.set(_parsed_task_id)
 
     def _sse(payload: dict) -> str:
         return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"

@@ -104,7 +104,7 @@ def get_team(project_id: str) -> Team:
         num_team_history_runs=3,
         share_member_interactions=True,
         instructions=[
-            "你是智能路由器，根据用户问题选择最合适的专家 Agent 来处理。",
+            "你是管理智能体，根据用户问题分配最合适的专家 Agent 来处理。",
             "你能看到之前的对话历史，要理解用户的指代（如'上面的'、'刚才的'等），结合上下文做出正确路由。",
             "",
             "## 核心路由原则",

@@ -1,10 +1,13 @@
-from fastapi import APIRouter
+from typing import Optional
+
+from fastapi import APIRouter, Query
 from fastapi.responses import FileResponse
 
-from config import WORKSPACE_DIR
+from config import WORKSPACE_DIR, KNOWLEDGE_DOCS_DIR
 from agents import AGENT_CONFIGS
 from skill_manager import _skill_registry
 from knowledge import _uploaded_docs
+from database import list_task_files
 
 router = APIRouter()
 
@@ -68,3 +71,37 @@ async def api_download_workspace_file(filename: str):
         media_type=media_type,
         content_disposition_type=disposition,
     )
+
+
+@router.get("/api/projects/{project_id}/tasks/{task_id}/files")
+async def api_list_task_files(
+    project_id: str,
+    task_id: str,
+    file_type: Optional[str] = Query(None),
+):
+    """List files associated with a specific task (or main chat if task_id='main')."""
+    tid = None if task_id == "main" else task_id
+    records = list_task_files(project_id, tid, file_type)
+
+    result = []
+    for rec in records:
+        entry = {
+            "file_name": rec["file_name"],
+            "file_type": rec["file_type"],
+            "file_source": rec["file_source"],
+            "created_at": rec["created_at"],
+        }
+        if rec["file_source"] == "workspace":
+            fpath = WORKSPACE_DIR / rec["file_name"]
+            if fpath.exists():
+                entry["size"] = fpath.stat().st_size
+            else:
+                entry["size"] = 0
+        elif rec["file_source"] == "knowledge":
+            fpath = KNOWLEDGE_DOCS_DIR / rec["file_name"]
+            if fpath.exists():
+                entry["size"] = fpath.stat().st_size
+            else:
+                entry["size"] = 0
+        result.append(entry)
+    return result

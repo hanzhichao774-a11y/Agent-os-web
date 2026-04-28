@@ -122,9 +122,11 @@ interface BizAgentProps {
   onClearAgent?: () => void;
   selectedSkillId?: string | null;
   onClearSkill?: () => void;
+  projectId?: string | null;
+  projectName?: string | null;
 }
 
-export default function BizAgent({ activeView, selectedAgentName, onClearAgent, selectedSkillId, onClearSkill }: BizAgentProps) {
+export default function BizAgent({ activeView, selectedAgentName, onClearAgent, selectedSkillId, onClearSkill, projectId, projectName }: BizAgentProps) {
   const [messages, setMessages] = useState<ChatMsg[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -249,7 +251,11 @@ export default function BizAgent({ activeView, selectedAgentName, onClearAgent, 
           }
         });
       } else {
-        await streamAgentChat('global', userMsg.content, sessionId.current, (chunk) => {
+        let messageToSend = userMsg.content;
+        if (projectId && projectName) {
+          messageToSend = `[当前项目上下文] 用户正在查看项目「${projectName}」(ID: ${projectId})。当用户说"这个项目"时，指的就是这个项目。\n\n用户问题：${userMsg.content}`;
+        }
+        await streamAgentChat('global', messageToSend, sessionId.current, (chunk) => {
           if (chunk.content) {
             setMessages(prev => prev.map(m =>
               m.id === assistantMsgId ? { ...m, content: m.content + chunk.content } : m
@@ -274,6 +280,7 @@ export default function BizAgent({ activeView, selectedAgentName, onClearAgent, 
     if (loading) return '等待回复中...';
     if (isCreateMode) return '描述你想创建的技能...';
     if (hasSkillDetail) return `输入针对 ${selectedSkill!.name} 的指令...`;
+    if (activeView === 'project') return '问我关于项目的任何问题...';
     return '你想让我们聊什么呢?';
   };
 
@@ -488,9 +495,13 @@ export default function BizAgent({ activeView, selectedAgentName, onClearAgent, 
                 <div className="w-14 h-14 bg-primary/10 rounded-2xl flex items-center justify-center mb-4">
                   <Sparkles className="w-7 h-7 text-primary" />
                 </div>
-                <h3 className="text-base font-semibold text-text mb-2">让我们一起高效协作</h3>
+                <h3 className="text-base font-semibold text-text mb-2">
+                  {activeView === 'project' ? '项目助手' : '让我们一起高效协作'}
+                </h3>
                 <p className="text-xs text-text-secondary leading-relaxed">
-                  你可以问我任何问题——我可以帮你查找 Agent、Skill 或项目
+                  {activeView === 'project'
+                    ? '你可以问我关于这个项目的任何问题——任务、产出文件、Agent、知识库等'
+                    : '你可以问我任何问题——我可以帮你查找 Agent、Skill 或项目'}
                 </p>
               </div>
             )

@@ -4,7 +4,6 @@ import Dashboard from './components/Dashboard';
 import BizAgent from './components/BizAgent';
 import ProjectChat from './components/ProjectChat';
 import ProjectDashboard from './components/ProjectDashboard';
-import ProjectFilePanel from './components/ProjectFilePanel';
 import AgentPage from './components/AgentPage';
 import SkillPage from './components/SkillPage';
 import RightPanel from './components/RightPanel';
@@ -126,8 +125,12 @@ function App() {
                 projectDescription={currentProject?.description || ''}
               />
             </div>
-            <div className="w-72 shrink-0 overflow-hidden">
-              <ProjectFilePanel projectId={activeProjectId!} />
+            <div className="w-80 shrink-0 overflow-hidden">
+              <BizAgent
+                activeView="project"
+                projectId={activeProjectId!}
+                projectName={currentProject?.name || activeProjectId!}
+              />
             </div>
           </>
         ) : isTaskChat ? (
@@ -148,6 +151,7 @@ function App() {
               <RightPanel
                 activeView={activeView}
                 activeProjectId={activeProjectId}
+                activeTaskId={chatTaskId}
                 teamAgents={teamAgents}
                 teamSteps={teamSteps}
                 outputs={chatOutputs}

@@ -52,6 +52,18 @@ def _init_projects_db():
         )
     """)
     conn.execute("CREATE INDEX IF NOT EXISTS idx_chat_session ON chat_messages(session_id, created_at)")
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS task_files (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_id TEXT NOT NULL,
+            task_id TEXT,
+            file_name TEXT NOT NULL,
+            file_type TEXT NOT NULL,
+            file_source TEXT NOT NULL,
+            created_at REAL DEFAULT (unixepoch())
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_task_files_task ON task_files(project_id, task_id)")
     conn.commit()
     count = conn.execute("SELECT COUNT(*) FROM projects").fetchone()[0]
     if count == 0:
@@ -94,3 +106,46 @@ def _load_chat_messages(session_id: str) -> list[dict]:
     ).fetchall()
     conn.close()
     return [{"id": r["id"], "role": r["role"], "content": r["content"], "agent_name": r["agent_name"], "timestamp": r["created_at"]} for r in rows]
+
+
+def register_task_file(project_id: str, task_id: str | None, file_name: str, file_type: str, file_source: str):
+    """Register a file's association with a project/task.
+    file_type: 'upload' | 'output'
+    file_source: 'knowledge' | 'workspace'
+    """
+    conn = _get_projects_conn()
+    conn.execute(
+        "INSERT INTO task_files (project_id, task_id, file_name, file_type, file_source, created_at) VALUES (?,?,?,?,?,?)",
+        (project_id, task_id, file_name, file_type, file_source, time.time()),
+    )
+    conn.commit()
+    conn.close()
+
+
+def list_task_files(project_id: str, task_id: str | None, file_type: str | None = None) -> list[dict]:
+    """List files associated with a specific project/task."""
+    conn = _get_projects_conn()
+    if task_id:
+        if file_type:
+            rows = conn.execute(
+                "SELECT file_name, file_type, file_source, created_at FROM task_files WHERE project_id = ? AND task_id = ? AND file_type = ? ORDER BY created_at DESC",
+                (project_id, task_id, file_type),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT file_name, file_type, file_source, created_at FROM task_files WHERE project_id = ? AND task_id = ? ORDER BY created_at DESC",
+                (project_id, task_id),
+            ).fetchall()
+    else:
+        if file_type:
+            rows = conn.execute(
+                "SELECT file_name, file_type, file_source, created_at FROM task_files WHERE project_id = ? AND task_id IS NULL AND file_type = ? ORDER BY created_at DESC",
+                (project_id, file_type),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT file_name, file_type, file_source, created_at FROM task_files WHERE project_id = ? AND task_id IS NULL ORDER BY created_at DESC",
+                (project_id,),
+            ).fetchall()
+    conn.close()
+    return [{"file_name": r["file_name"], "file_type": r["file_type"], "file_source": r["file_source"], "created_at": r["created_at"]} for r in rows]

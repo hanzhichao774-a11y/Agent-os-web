@@ -1,9 +1,6 @@
-import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
-import { Send, Loader2, X, Plus, MessageCircle } from 'lucide-react';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
-import { fetchAgents, fetchSkills, fetchWorkspaceFiles, streamAgentChat, fetchSessionMessages } from '../services/api';
-import type { AgentInfo, SkillInfo, WorkspaceFile, ChatChunk } from '../services/api';
+import { useRef, useEffect } from 'react';
+import { fetchAgents, fetchSkills, fetchWorkspaceFiles } from '../services/api';
+import type { AgentInfo, SkillInfo, WorkspaceFile } from '../services/api';
 
 interface ProjectDashboardProps {
   projectId: string;
@@ -37,38 +34,9 @@ interface GraphEdge {
   target: string;
 }
 
-interface ChatMsg {
-  id: string;
-  role: 'assistant' | 'human' | 'system';
-  content: string;
-}
-
 const NODE_TYPE_LABELS: Record<NodeType, string> = {
   project: '项目', agent: 'Agent', skill: 'Skill', file: '文件', insight: '洞察',
 };
-
-function stripThinkTags(text: string): string {
-  return text.replace(/<think>[\s\S]*?<\/think>/g, '').replace(/<\/?member[^>]*>/g, '').trim();
-}
-
-function MarkdownContent({ content }: { content: string }) {
-  const cleaned = useMemo(() => stripThinkTags(content), [content]);
-  return (
-    <ReactMarkdown remarkPlugins={[remarkGfm]} components={{
-      p: ({ children }) => <p className="mb-1 last:mb-0 text-sm">{children}</p>,
-      ul: ({ children }) => <ul className="list-disc pl-4 mb-1 text-sm">{children}</ul>,
-      ol: ({ children }) => <ol className="list-decimal pl-4 mb-1 text-sm">{children}</ol>,
-      code: ({ children, className }) => {
-        if (className?.startsWith('language-')) {
-          return <pre className="bg-gray-100 dark:bg-gray-800 rounded p-2 overflow-x-auto text-xs mb-1"><code>{children}</code></pre>;
-        }
-        return <code className="bg-gray-100 dark:bg-gray-800 px-1 py-0.5 rounded text-xs">{children}</code>;
-      },
-      pre: ({ children }) => <>{children}</>,
-      strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
-    }}>{cleaned}</ReactMarkdown>
-  );
-}
 
 function makeNode(
   id: string, label: string, type: NodeType, radius: number, mass: number, layer: number, detail: string, meta?: Record<string, string>
@@ -142,12 +110,6 @@ function buildGraph(
 }
 
 export default function ProjectDashboard({ projectId, projectName, projectDescription }: ProjectDashboardProps) {
-  const [chatOpen, setChatOpen] = useState(true);
-  const [chatMessages, setChatMessages] = useState<ChatMsg[]>([]);
-  const [chatInput, setChatInput] = useState('');
-  const [chatLoading, setChatLoading] = useState(false);
-  const [chatPos, setChatPos] = useState<{ x: number; y: number } | null>(null);
-
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const canvasContainerRef = useRef<HTMLDivElement>(null);
@@ -156,31 +118,6 @@ export default function ProjectDashboard({ projectId, projectName, projectDescri
   const graphRef = useRef<{ nodes: GraphNode[]; edges: GraphEdge[] }>({ nodes: [], edges: [] });
   const draggedNodeRef = useRef<GraphNode | null>(null);
   const hoveredNodeRef = useRef<GraphNode | null>(null);
-  const chatDragRef = useRef<{ startX: number; startY: number; posX: number; posY: number } | null>(null);
-  const sessionId = useRef(`bizagent_dash_${projectId}`);
-  const chatBottomRef = useRef<HTMLDivElement>(null);
-  const chatRectRef = useRef<{ x: number; y: number; w: number; h: number; active: boolean }>({ x: 0, y: 0, w: 0, h: 0, active: false });
-
-  useEffect(() => {
-    chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [chatMessages]);
-
-  useEffect(() => {
-    sessionId.current = `bizagent_dash_${projectId}`;
-    const backendSessionId = sessionId.current;
-    fetchSessionMessages(backendSessionId).then(history => {
-      if (history.length > 0) {
-        const restored: ChatMsg[] = history.map(m => ({
-          id: m.id,
-          role: m.role === 'user' ? 'human' : (m.role as ChatMsg['role']),
-          content: m.content,
-        }));
-        setChatMessages(restored);
-      } else {
-        setChatMessages([]);
-      }
-    });
-  }, [projectId]);
 
   // Build graph data from API
   useEffect(() => {
@@ -222,7 +159,6 @@ export default function ProjectDashboard({ projectId, projectName, projectDescri
     const ro = new ResizeObserver(resize);
     ro.observe(container);
 
-    // Wait a frame for graph to be built
     const initTimer = setTimeout(() => {
       const { nodes, edges } = graphRef.current;
       if (nodes.length === 0) return;
@@ -230,7 +166,6 @@ export default function ProjectDashboard({ projectId, projectName, projectDescri
       const cx = W / 2, cy = H / 2;
       const minDim = Math.min(W, H);
 
-      // Position nodes by layer
       const layers = [
         nodes.filter(n => n.layer === 0),
         nodes.filter(n => n.layer === 1),
@@ -254,7 +189,6 @@ export default function ProjectDashboard({ projectId, projectName, projectDescri
         n.y = cy + Math.sin(angle) * r;
       });
 
-      // Warmup: 1500 iterations to converge
       for (let f = 0; f < 1500; f++) {
         for (let i = 0; i < nodes.length; i++) {
           for (let j = i + 1; j < nodes.length; j++) {
@@ -293,7 +227,6 @@ export default function ProjectDashboard({ projectId, projectName, projectDescri
 
       nodes.forEach(n => { n.baseX = n.x; n.baseY = n.y; n.vx = 0; n.vy = 0; });
 
-      // Continuous render loop
       const NODE_REPULSE = 300;
       const FLOW_SPRING = 0.002;
       const FLOW_REST = 280;
@@ -305,22 +238,6 @@ export default function ProjectDashboard({ projectId, projectName, projectDescri
       const render = () => {
         const dpr = window.devicePixelRatio || 1;
         const now = Date.now();
-
-        // BizAgent chat avoidance
-        const cr = chatRectRef.current;
-        if (cr.active) {
-          const exCX = cr.x + cr.w / 2;
-          const exCY = cr.y + cr.h / 2;
-          nodes.forEach(n => {
-            const dx = n.x - exCX, dy = n.y - exCY;
-            const dist = Math.sqrt(dx * dx + dy * dy) || 1;
-            if (dist < 150) {
-              const t = 1 - dist / 150;
-              n.vx += (dx / dist) * t * t * 0.06;
-              n.vy += (dy / dist) * t * t * 0.06;
-            }
-          });
-        }
 
         nodes.forEach(n => {
           if (n === draggedNodeRef.current) {
@@ -370,7 +287,6 @@ export default function ProjectDashboard({ projectId, projectName, projectDescri
           n.x += n.vx; n.y += n.vy;
         });
 
-        // Draw
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
         ctx.clearRect(0, 0, W, H);
 
@@ -498,83 +414,10 @@ export default function ProjectDashboard({ projectId, projectName, projectDescri
     };
   }, []);
 
-  // Track BizAgent chat position for avoidance
-  useEffect(() => {
-    if (chatOpen && chatPos) {
-      chatRectRef.current = { x: chatPos.x, y: chatPos.y, w: 360, h: 420, active: true };
-    } else {
-      chatRectRef.current.active = false;
-    }
-  }, [chatOpen, chatPos]);
-
-  // BizAgent chat positioning
-  useEffect(() => {
-    if (chatOpen && !chatPos && containerRef.current) {
-      const rect = containerRef.current.getBoundingClientRect();
-      setChatPos({ x: rect.width - 360 - 24, y: rect.height - 420 - 24 });
-    }
-  }, [chatOpen, chatPos]);
-
-  const handleChatHeaderMouseDown = (e: React.MouseEvent) => {
-    if ((e.target as HTMLElement).closest('button')) return;
-    if (!chatPos) return;
-    chatDragRef.current = {
-      startX: e.clientX, startY: e.clientY,
-      posX: chatPos.x, posY: chatPos.y,
-    };
-    e.preventDefault();
-  };
-
-  const handleContainerMouseMove = useCallback((e: React.MouseEvent) => {
-    if (chatDragRef.current) {
-      setChatPos({
-        x: chatDragRef.current.posX + (e.clientX - chatDragRef.current.startX),
-        y: chatDragRef.current.posY + (e.clientY - chatDragRef.current.startY),
-      });
-    }
-  }, []);
-
-  const handleContainerMouseUp = useCallback(() => {
-    chatDragRef.current = null;
-  }, []);
-
-  const handleChatSend = async () => {
-    if (!chatInput.trim() || chatLoading) return;
-    const userMsg: ChatMsg = { id: `u_${Date.now()}`, role: 'human', content: chatInput };
-    setChatMessages(prev => [...prev, userMsg]);
-    setChatInput('');
-    setChatLoading(true);
-
-    const contextPrefix = `[当前项目上下文] 用户正在查看项目「${projectName}」(ID: ${projectId})。当用户说"这个项目"时，指的就是这个项目。\n\n用户问题：`;
-    const messageWithContext = contextPrefix + userMsg.content;
-
-    const assistantId = `a_${Date.now()}`;
-    setChatMessages(prev => [...prev, { id: assistantId, role: 'assistant', content: '' }]);
-
-    try {
-      await streamAgentChat('global', messageWithContext, sessionId.current, (chunk: ChatChunk) => {
-        if (chunk.content) {
-          setChatMessages(prev => prev.map(m =>
-            m.id === assistantId ? { ...m, content: m.content + chunk.content } : m
-          ));
-        }
-      });
-    } catch {
-      setChatMessages(prev => prev.map(m =>
-        m.id === assistantId ? { ...m, content: '请求失败，请确认后端服务已启动。' } : m
-      ));
-    } finally {
-      setChatLoading(false);
-    }
-  };
-
   return (
     <div
       ref={containerRef}
-      className="h-full flex flex-col bg-bg relative overflow-hidden"
-      onMouseMove={handleContainerMouseMove}
-      onMouseUp={handleContainerMouseUp}
-      onMouseLeave={handleContainerMouseUp}
+      className="h-full flex flex-col bg-bg overflow-hidden"
     >
       {/* Header */}
       <div className="px-6 pt-5 pb-3 shrink-0">
@@ -591,99 +434,6 @@ export default function ProjectDashboard({ projectId, projectName, projectDescri
           style={{ display: 'none' }}
         />
       </div>
-
-      {/* Floating BizAgent Chat */}
-      {chatOpen ? (
-        <div
-          className="absolute w-[360px] bg-surface border border-border rounded-2xl shadow-xl flex flex-col overflow-hidden z-10"
-          style={{
-            maxHeight: '420px',
-            left: chatPos ? `${chatPos.x}px` : undefined,
-            top: chatPos ? `${chatPos.y}px` : undefined,
-            right: chatPos ? undefined : '24px',
-            bottom: chatPos ? undefined : '24px',
-          }}
-        >
-          <div
-            className="flex items-center gap-2.5 px-4 py-3 border-b border-border shrink-0 cursor-move select-none"
-            onMouseDown={handleChatHeaderMouseDown}
-          >
-            <div className="w-7 h-7 bg-amber-500 rounded-lg flex items-center justify-center">
-              <MessageCircle className="w-4 h-4 text-white" />
-            </div>
-            <span className="font-semibold text-text text-sm">BizAgent</span>
-            <span className="w-2 h-2 rounded-full bg-success" />
-            <div className="flex-1" />
-            <button onClick={() => setChatOpen(false)} className="p-1 hover:bg-bg rounded-lg transition-colors">
-              <X className="w-4 h-4 text-text-muted" />
-            </button>
-          </div>
-
-          <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3 min-h-0">
-            {chatMessages.length === 0 && (
-              <div className="text-center py-6">
-                <p className="text-sm text-text-muted">关于这个项目，你想问什么...</p>
-              </div>
-            )}
-            {chatMessages.map(msg => (
-              <div key={msg.id} className={`flex ${msg.role === 'human' ? 'justify-end' : 'justify-start'}`}>
-                <div className={`max-w-[85%] rounded-xl px-3 py-2 text-sm ${
-                  msg.role === 'human'
-                    ? 'bg-primary text-white rounded-tr-sm'
-                    : 'bg-bg border border-border text-text rounded-tl-sm'
-                }`}>
-                  {msg.role === 'human' ? (
-                    <div className="whitespace-pre-wrap">{msg.content}</div>
-                  ) : msg.content === '' ? (
-                    <div className="flex items-center gap-1.5 text-text-muted text-xs">
-                      <Loader2 className="w-3 h-3 animate-spin" /> 思考中...
-                    </div>
-                  ) : (
-                    <MarkdownContent content={msg.content} />
-                  )}
-                </div>
-              </div>
-            ))}
-            <div ref={chatBottomRef} />
-          </div>
-
-          <div className="border-t border-border px-3 py-2.5 shrink-0">
-            <div className="flex items-center gap-2 bg-bg border border-border rounded-xl px-3 py-2 focus-within:border-primary transition-colors">
-              <button className="shrink-0 p-0.5 hover:bg-border-light rounded transition-colors">
-                <Plus className="w-4 h-4 text-text-muted" />
-              </button>
-              <input
-                value={chatInput}
-                onChange={e => setChatInput(e.target.value)}
-                onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleChatSend(); } }}
-                placeholder="问我关于项目的任何问题..."
-                disabled={chatLoading}
-                className="flex-1 bg-transparent outline-none text-sm text-text disabled:opacity-50"
-              />
-              <button
-                onClick={handleChatSend}
-                disabled={chatLoading || !chatInput.trim()}
-                className="p-1.5 bg-primary hover:bg-primary-dark text-white rounded-lg transition-colors disabled:opacity-40 shrink-0"
-              >
-                {chatLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : (
-        <button
-          onClick={() => setChatOpen(true)}
-          className="absolute w-12 h-12 bg-amber-500 hover:bg-amber-600 text-white rounded-full shadow-lg flex items-center justify-center transition-colors z-10"
-          style={{
-            left: chatPos ? `${chatPos.x}px` : undefined,
-            top: chatPos ? `${chatPos.y}px` : undefined,
-            right: chatPos ? undefined : '24px',
-            bottom: chatPos ? undefined : '24px',
-          }}
-        >
-          <MessageCircle className="w-5 h-5" />
-        </button>
-      )}
     </div>
   );
 }

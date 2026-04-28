@@ -305,10 +305,18 @@ export async function updateAgentConfig(
 }
 
 /** 上传文档到知识库 */
-export async function uploadDocument(file: File): Promise<{ success: boolean; doc_name?: string; chunks?: number; error?: string }> {
+export async function uploadDocument(
+  file: File,
+  projectId?: string,
+  taskId?: string,
+): Promise<{ success: boolean; doc_name?: string; chunks?: number; error?: string }> {
   const formData = new FormData();
   formData.append('file', file);
-  const res = await fetch(`${API_BASE}/api/knowledge/upload`, {
+  const params = new URLSearchParams();
+  if (projectId) params.set('project_id', projectId);
+  if (taskId) params.set('task_id', taskId);
+  const qs = params.toString();
+  const res = await fetch(`${API_BASE}/api/knowledge/upload${qs ? `?${qs}` : ''}`, {
     method: 'POST',
     body: formData,
   });
@@ -337,6 +345,27 @@ export function getWorkspaceFileUrl(filename: string): string {
 /** 获取知识库文档列表 */
 export async function fetchKnowledgeDocs(): Promise<Array<{ doc_name: string; chunks: number }>> {
   const res = await fetch(`${API_BASE}/api/knowledge/docs`);
+  if (!res.ok) return [];
+  return res.json();
+}
+
+/** 任务文件记录 */
+export interface TaskFile {
+  file_name: string;
+  file_type: 'upload' | 'output';
+  file_source: 'knowledge' | 'workspace';
+  size?: number;
+  created_at: number;
+}
+
+/** 获取指定任务的文件列表 */
+export async function fetchTaskFiles(
+  projectId: string,
+  taskId: string,
+  fileType?: 'upload' | 'output',
+): Promise<TaskFile[]> {
+  const params = fileType ? `?file_type=${fileType}` : '';
+  const res = await fetch(`${API_BASE}/api/projects/${projectId}/tasks/${encodeURIComponent(taskId)}/files${params}`);
   if (!res.ok) return [];
   return res.json();
 }

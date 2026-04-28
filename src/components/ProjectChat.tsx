@@ -410,7 +410,7 @@ export default function ProjectChat({ projectId, taskId, projectName, projectDes
     setIsUploading(true);
     setMessages(prev => [...prev, { id: `upload_${Date.now()}`, role: 'system', content: `正在上传 ${file.name}...`, timestamp: now() }]);
     try {
-      const result = await uploadDocument(file);
+      const result = await uploadDocument(file, projectId, taskId || undefined);
       const msg = result.success
         ? `已上传 ${result.doc_name}，共 ${result.chunks} 个段落已入库。`
         : `上传失败：${result.error || '未知错误'}`;
@@ -584,7 +584,7 @@ export default function ProjectChat({ projectId, taskId, projectName, projectDes
           >
             {isUploading ? <Loader2 className="w-4 h-4 text-text-muted animate-spin" /> : <Paperclip className="w-4 h-4 text-text-muted" />}
           </button>
-          <input ref={fileInputRef} type="file" accept=".txt,.md,.markdown,.text,.pdf" onChange={handleFileUpload} className="hidden" />
+          <input ref={fileInputRef} type="file" accept=".txt,.md,.markdown,.text,.pdf,.docx,.xlsx,.xls,.csv" onChange={handleFileUpload} className="hidden" />
           <input
             value={input}
             onChange={(e) => setInput(e.target.value)}

@@ -166,4 +166,14 @@ def generate_chart(
     output_path = WORKSPACE_DIR / output_filename
     fig.savefig(str(output_path), dpi=150, bbox_inches="tight")
     plt.close(fig)
+
+    try:
+        from context import current_project_id, current_task_id
+        from database import register_task_file
+        pid = current_project_id.get()
+        if pid:
+            register_task_file(pid, current_task_id.get(), output_filename, "output", "workspace")
+    except Exception:
+        pass
+
     return str(output_path)

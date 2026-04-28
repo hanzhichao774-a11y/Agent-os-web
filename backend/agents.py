@@ -9,7 +9,6 @@ from agno.tools.file import FileTools
 from agno.tools.file_generation import FileGenerationTools
 from agno.tools.python import PythonTools
 from agno.tools.calculator import CalculatorTools
-from agno.guardrails.prompt_injection import PromptInjectionGuardrail
 
 from config import BASE_DIR, WORKSPACE_DIR, SESSIONS_DB
 from llm import create_model
@@ -21,6 +20,21 @@ from builtin_tools import (
 
 
 _agent_tools: dict[str, list[str]] = {}
+
+
+def list_knowledge_documents() -> str:
+    """列出知识库中所有已入库的文档名称和段落数量。"""
+    from knowledge import list_documents
+    docs = list_documents()
+    if not docs:
+        return "知识库当前没有已入库的文档。"
+    lines = []
+    for d in docs:
+        chunks = d["chunks"]
+        chunk_str = f"{chunks} 个段落" if chunks >= 0 else "已入库"
+        lines.append(f"- {d['doc_name']}（{chunk_str}）")
+    return f"知识库共有 {len(docs)} 个文档：\n" + "\n".join(lines)
+
 
 AGENT_CONFIGS: dict[str, dict] = {
     "a1": {
@@ -70,13 +84,19 @@ AGENT_CONFIGS: dict[str, dict] = {
         "avatar": "🔍",
         "description": "企业内部知识库问答与检索",
         "capabilities": ["RAG", "文档解析", "语义搜索"],
+        "builtin_tools": ["_knowledge_list"],
         "instructions": [
             "你是企业知识库检索专家。",
-            "当用户提问时，系统会自动从知识库中检索相关文档片段并附在上下文中。",
-            "你必须优先基于这些检索到的文档片段来回答问题。",
-            "在回答中标注信息出处（如引用的文档名称）。",
-            "如果知识库中没有找到相关内容，如实告知用户。",
-            "始终使用中文回答。",
+            "",
+            "## 工具能力",
+            "- list_knowledge_documents：列出知识库中所有已入库的文档名称和段落数量",
+            "",
+            "## 行为准则",
+            "- 当用户询问'有哪些文档/知识已入库'、'知识库中有什么'等**列举类问题**时，先调用 list_knowledge_documents 工具获取完整文档列表，再结合语义搜索结果补充内容摘要。",
+            "- 当用户提问具体内容时，优先基于系统自动检索到的文档片段来回答。",
+            "- 在回答中标注信息出处（如引用的文档名称）。",
+            "- 如果知识库中没有找到相关内容，如实告知用户。",
+            "- 始终使用中文回答。",
         ],
         "has_knowledge": True,
     },
@@ -303,6 +323,7 @@ def _make_builtin_tools(tool_names: list[str]) -> list:
         "excel": lambda: generate_excel,
         "image": lambda: process_image,
         "http": lambda: http_request,
+        "_knowledge_list": lambda: list_knowledge_documents,
     }
     tools = []
     for name in tool_names:
@@ -360,8 +381,6 @@ def get_agent(agent_id: str) -> Agent | None:
             kwargs["search_knowledge"] = True
             kwargs["enable_agentic_knowledge_filters"] = True
 
-        _guardrail = PromptInjectionGuardrail()
-
         agent = Agent(
             name=config["name"],
             id=agent_id,
@@ -369,7 +388,6 @@ def get_agent(agent_id: str) -> Agent | None:
             db=SqliteDb(db_file=SESSIONS_DB),
             instructions=config["instructions"],
             tools=all_tools if all_tools else None,
-            pre_hooks=[_guardrail],
             add_history_to_context=True,
             num_history_runs=10,
             markdown=True,

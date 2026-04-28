@@ -1,8 +1,8 @@
 import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
-import { Send, Loader2, Paperclip, Plus, FolderOpen, Download, ExternalLink } from 'lucide-react';
+import { Send, Loader2, Paperclip, Plus, FolderOpen, Download, ExternalLink, Cpu } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { streamTeamChat, uploadDocument, fetchTasks, fetchSessionMessages, getWorkspaceFileUrl } from '../services/api';
+import { streamOrchestratorChat, uploadDocument, fetchTasks, fetchSessionMessages, getWorkspaceFileUrl } from '../services/api';
 import type { TeamChatEvent, TaskInfo } from '../services/api';
 import type { TeamAgentStatus, TeamTaskStep, OutputItem } from '../App';
 
@@ -19,7 +19,7 @@ interface ProjectChatProps {
 
 interface ChatMsg {
   id: string;
-  role: 'system' | 'leader' | 'member' | 'delegation' | 'human';
+  role: 'system' | 'leader' | 'member' | 'delegation' | 'human' | 'plan';
   agentName?: string;
   content: string;
   timestamp: string;
@@ -74,14 +74,6 @@ function MarkdownContent({ content }: { content: string }) {
   );
 }
 
-const MEMBER_COLORS = [
-  { bg: 'bg-emerald-500', text: 'text-white' },
-  { bg: 'bg-blue-500', text: 'text-white' },
-  { bg: 'bg-amber-500', text: 'text-white' },
-  { bg: 'bg-rose-500', text: 'text-white' },
-  { bg: 'bg-violet-500', text: 'text-white' },
-];
-
 const OUTPUT_TYPE_PATTERN = /已生成\**\s*(柱状图|折线图|饼图|散点图|热力图|雷达图|表格|报告|文档|PPT|PDF|图表)\**[：:]\s*(.+)/g;
 const OUTPUT_FILE_PATTERN = /(?:已生成|文件名称|文件名|文件路径|生成文件)\**[：:\s]+`?(\S+?\.(pdf|xlsx|xls|csv|png|jpg|pptx?|docx?|txt|md))`?/gi;
 
@@ -98,13 +90,7 @@ function parseOutputItems(content: string, msgId: string, agentName?: string, ti
     const key = `${type}:${title}`;
     if (!seen.has(key)) {
       seen.add(key);
-      items.push({
-        id: `${msgId}_out_${items.length}`,
-        title,
-        type,
-        agentName,
-        timestamp: timestamp || '',
-      });
+      items.push({ id: `${msgId}_out_${items.length}`, title, type, agentName, timestamp: timestamp || '' });
     }
   }
 
@@ -115,13 +101,7 @@ function parseOutputItems(content: string, msgId: string, agentName?: string, ti
     const key = `file:${fileName}`;
     if (!seen.has(key)) {
       seen.add(key);
-      items.push({
-        id: `${msgId}_file_${items.length}`,
-        title: fileName,
-        type: ext,
-        agentName,
-        timestamp: timestamp || '',
-      });
+      items.push({ id: `${msgId}_file_${items.length}`, title: fileName, type: ext, agentName, timestamp: timestamp || '' });
     }
   }
 
@@ -169,28 +149,51 @@ function OutputCards({ items }: { items: OutputItem[] }) {
   );
 }
 
+function SubTaskCard({ slotId, description, status }: { slotId: number; description: string; status: 'pending' | 'working' | 'completed' | 'failed' }) {
+  const statusConfig = {
+    pending: { color: 'text-gray-400', bg: 'bg-gray-100 dark:bg-gray-800', label: '等待中' },
+    working: { color: 'text-blue-500', bg: 'bg-blue-50 dark:bg-blue-500/10', label: '执行中' },
+    completed: { color: 'text-emerald-500', bg: 'bg-emerald-50 dark:bg-emerald-500/10', label: '已完成' },
+    failed: { color: 'text-red-500', bg: 'bg-red-50 dark:bg-red-500/10', label: '失败' },
+  };
+  const cfg = statusConfig[status];
+  return (
+    <div className={`flex items-center gap-3 ${cfg.bg} rounded-lg px-3 py-2 text-xs`}>
+      <div className="flex items-center gap-1.5">
+        <Cpu className={`w-3.5 h-3.5 ${cfg.color}`} />
+        <span className="font-medium text-text">#{slotId}</span>
+      </div>
+      <span className="flex-1 text-text-secondary truncate">{description}</span>
+      <span className={`font-medium ${cfg.color} shrink-0`}>
+        {status === 'working' && <Loader2 className="w-3 h-3 animate-spin inline mr-1" />}
+        {cfg.label}
+      </span>
+    </div>
+  );
+}
+
 export default function ProjectChat({ projectId, taskId, projectName, projectDescription, onResetTeamState, onUpdateTeamAgents, onUpdateTeamSteps, onOutputsChange }: ProjectChatProps) {
   const [messages, setMessages] = useState<ChatMsg[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [taskName, setTaskName] = useState<string | null>(null);
+  const [activePlan, setActivePlan] = useState<{ subtasks: Array<{ slot_id: number; description: string; status: string }> } | null>(null);
   const sessionId = useRef(`team_${projectId}_task_${taskId || 'main'}`);
   const msgCache = useRef(new Map<string, ChatMsg[]>());
   const messagesRef = useRef(messages);
   messagesRef.current = messages;
   const bottomRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const memberMsgIds = useRef(new Map<string, string>());
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+  }, [messages, activePlan]);
 
   const extractOutputs = useCallback(() => {
     const allOutputs: OutputItem[] = [];
     for (const msg of messagesRef.current) {
-      if (msg.role === 'member' || msg.role === 'leader') {
+      if (msg.role === 'leader') {
         const items = parseOutputItems(msg.content, msg.id, msg.agentName, msg.timestamp);
         allOutputs.push(...items);
       }
@@ -225,7 +228,7 @@ export default function ProjectChat({ projectId, taskId, projectName, projectDes
     if (cached && cached.length > 0) {
       setMessages(cached);
     } else {
-      const backendSessionId = `team_${projectId}_${newSessionId}`;
+      const backendSessionId = `orch_${projectId}_${newSessionId}`;
       fetchSessionMessages(backendSessionId).then(history => {
         if (history.length > 0) {
           const restored: ChatMsg[] = history.map(m => ({
@@ -243,7 +246,7 @@ export default function ProjectChat({ projectId, taskId, projectName, projectDes
             {
               id: `sys_${newSessionId}`,
               role: 'system',
-              content: `群主 BizAgent 已创建项目：${projectName}`,
+              content: `BizAgent 已就绪，项目：${projectName}`,
               timestamp: now(),
             },
           ]);
@@ -263,143 +266,141 @@ export default function ProjectChat({ projectId, taskId, projectName, projectDes
     setMessages(prev => [...prev, userMsg]);
     setInput('');
     setIsLoading(true);
+    setActivePlan(null);
 
     onResetTeamState();
-    onUpdateTeamSteps(() => [{ name: 'Leader 分析', agent: 'Team Leader', status: 'in-progress', time: now(), startedAt: Date.now() }]);
 
-    const leaderMsgId = `leader_${Date.now()}`;
-    memberMsgIds.current = new Map<string, string>();
-    let leaderStepAdded = false;
+    const contentMsgId = `content_${Date.now()}`;
+    const summaryMsgId = `summary_${Date.now()}`;
 
     try {
-      await streamTeamChat(projectId, userMsg.content, sessionId.current, (event: TeamChatEvent) => {
-        if (event.type === 'member_delegated') {
-          const delegationId = `del_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-          const agentName = event.agent_name || '成员';
-          setMessages(prev => [...prev, {
-            id: delegationId,
-            role: 'delegation',
-            agentName,
-            content: event.task
-              ? `正在将任务分配给 **${agentName}**：${event.task}`
-              : `正在将任务分配给 **${agentName}**`,
-            timestamp: now(),
-          }]);
-
-          onUpdateTeamSteps(prev => {
-            const t = Date.now();
-            const updated = prev.map(s => s.name === 'Leader 分析' && s.status === 'in-progress'
-              ? { ...s, status: 'completed' as const, duration: s.startedAt ? `${((t - s.startedAt) / 1000).toFixed(1)}s` : undefined }
-              : s);
-            if (!updated.some(s => s.agent === agentName)) {
-              return [...updated, { name: agentName.replace(/^\S+\s/, ''), agent: agentName, status: 'pending' as const, time: now() }];
-            }
-            return updated;
-          });
-          onUpdateTeamAgents(prev => {
-            if (!prev.some(a => a.name === agentName)) {
-              return [...prev, { name: agentName, status: 'idle', currentTask: '等待执行' }];
-            }
-            return prev;
-          });
-
-        } else if (event.type === 'member_started') {
-          const agentName = event.agent_name || '成员';
-          if (!memberMsgIds.current.has(agentName)) {
-            const msgId = `member_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-            memberMsgIds.current.set(agentName, msgId);
-            setMessages(prev => [...prev, {
-              id: msgId,
-              role: 'member',
-              agentName,
-              content: '',
-              timestamp: now(),
-            }]);
-          }
-
-          onUpdateTeamSteps(prev => prev.map(s => s.agent === agentName ? { ...s, status: 'in-progress' as const, time: now(), startedAt: Date.now() } : s));
-          onUpdateTeamAgents(prev => prev.map(a => a.name === agentName ? { ...a, status: 'working', currentTask: '正在执行...' } : a));
-
-        } else if (event.type === 'member_streaming') {
-          const agentName = event.agent_name || '成员';
-          let msgId = memberMsgIds.current.get(agentName);
-          if (!msgId) {
-            msgId = `member_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-            memberMsgIds.current.set(agentName, msgId);
-            setMessages(prev => [...prev, {
-              id: msgId!,
-              role: 'member',
-              agentName,
-              content: event.content || '',
-              timestamp: now(),
-            }]);
-          } else {
-            setMessages(prev => prev.map(m =>
-              m.id === msgId ? { ...m, content: m.content + (event.content || '') } : m
-            ));
-          }
-
-          onUpdateTeamAgents(prev => prev.map(a => a.name === agentName ? { ...a, status: 'working', currentTask: '回答中...' } : a));
-
-        } else if (event.type === 'member_response') {
-          const agentName = event.agent_name || '成员';
-          let msgId = memberMsgIds.current.get(agentName);
-          if (!msgId) {
-            msgId = `member_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-            memberMsgIds.current.set(agentName, msgId);
-            setMessages(prev => [...prev, {
-              id: msgId!,
-              role: 'member',
-              agentName,
-              content: event.content || '',
-              timestamp: now(),
-            }]);
-          } else {
-            setMessages(prev => prev.map(m =>
-              m.id === msgId ? { ...m, content: m.content + (event.content || '') } : m
-            ));
-          }
-
-          onUpdateTeamSteps(prev => prev.map(s => s.agent === agentName
-            ? { ...s, status: 'completed' as const, duration: s.startedAt ? `${((Date.now() - s.startedAt) / 1000).toFixed(1)}s` : undefined }
-            : s));
-          onUpdateTeamAgents(prev => prev.map(a => a.name === agentName ? { ...a, status: 'done', currentTask: '已完成' } : a));
-
-        } else if (event.type === 'leader_content') {
-          if (!leaderStepAdded) {
-            leaderStepAdded = true;
-            onUpdateTeamSteps(prev => [...prev, { name: 'Leader 汇总', agent: 'Team Leader', status: 'in-progress', time: now(), startedAt: Date.now() }]);
-          }
+      await streamOrchestratorChat(projectId, userMsg.content, sessionId.current, (event: TeamChatEvent) => {
+        if (event.type === 'content') {
           setMessages(prev => {
-            const existing = prev.find(m => m.id === leaderMsgId);
+            const existing = prev.find(m => m.id === contentMsgId);
             if (!existing) {
               return [...prev, {
-                id: leaderMsgId,
-                role: 'leader',
+                id: contentMsgId,
+                role: 'leader' as const,
                 content: event.content || '',
                 timestamp: now(),
               }];
             }
             return prev.map(m =>
-              m.id === leaderMsgId ? { ...m, content: m.content + (event.content || '') } : m
+              m.id === contentMsgId ? { ...m, content: m.content + (event.content || '') } : m
             );
           });
+
+        } else if (event.type === 'plan_created') {
+          const subtasks = (event.subtasks || []).map(st => ({ ...st, status: 'pending' }));
+          setActivePlan({ subtasks });
+
+          setMessages(prev => [...prev, {
+            id: `plan_${Date.now()}`,
+            role: 'plan' as const,
+            content: `${event.reasoning || ''}`,
+            timestamp: now(),
+          }]);
+
+          onUpdateTeamSteps(() => subtasks.map(st => ({
+            name: `SubAgent #${st.slot_id}`,
+            agent: `SubAgent #${st.slot_id}`,
+            status: 'pending' as const,
+            time: now(),
+          })));
+
+        } else if (event.type === 'subtask_started') {
+          setActivePlan(prev => {
+            if (!prev) return prev;
+            return {
+              subtasks: prev.subtasks.map(st =>
+                st.slot_id === event.slot_id ? { ...st, status: 'working' } : st
+              ),
+            };
+          });
+
+          onUpdateTeamSteps(prev => prev.map(s =>
+            s.agent === `SubAgent #${event.slot_id}` ? { ...s, status: 'in-progress' as const, startedAt: Date.now() } : s
+          ));
+          onUpdateTeamAgents(prev => {
+            const name = `SubAgent #${event.slot_id}`;
+            if (!prev.some(a => a.name === name)) {
+              return [...prev, { name, status: 'working', currentTask: event.description || '' }];
+            }
+            return prev.map(a => a.name === name ? { ...a, status: 'working', currentTask: event.description || '' } : a);
+          });
+
+        } else if (event.type === 'subtask_completed') {
+          setActivePlan(prev => {
+            if (!prev) return prev;
+            return {
+              subtasks: prev.subtasks.map(st =>
+                st.slot_id === event.slot_id ? { ...st, status: 'completed' } : st
+              ),
+            };
+          });
+
+          onUpdateTeamSteps(prev => prev.map(s =>
+            s.agent === `SubAgent #${event.slot_id}`
+              ? { ...s, status: 'completed' as const, duration: s.startedAt ? `${((Date.now() - s.startedAt) / 1000).toFixed(1)}s` : undefined, tokens: event.token_usage?.total_tokens }
+              : s
+          ));
+          onUpdateTeamAgents(prev => prev.map(a =>
+            a.name === `SubAgent #${event.slot_id}` ? { ...a, status: 'done', currentTask: '已完成' } : a
+          ));
+
+        } else if (event.type === 'subtask_failed') {
+          setActivePlan(prev => {
+            if (!prev) return prev;
+            return {
+              subtasks: prev.subtasks.map(st =>
+                st.slot_id === event.slot_id ? { ...st, status: 'failed' } : st
+              ),
+            };
+          });
+
+        } else if (event.type === 'summary') {
+          setMessages(prev => {
+            const existing = prev.find(m => m.id === summaryMsgId);
+            if (!existing) {
+              return [...prev, {
+                id: summaryMsgId,
+                role: 'leader' as const,
+                agentName: 'BizAgent',
+                content: event.content || '',
+                timestamp: now(),
+              }];
+            }
+            return prev.map(m =>
+              m.id === summaryMsgId ? { ...m, content: m.content + (event.content || '') } : m
+            );
+          });
+
+        } else if (event.type === 'plan_completed') {
+          setActivePlan(null);
+
+        } else if (event.type === 'error') {
+          setMessages(prev => [...prev, {
+            id: `err_${Date.now()}`,
+            role: 'system' as const,
+            content: event.content || '编排出错',
+            timestamp: now(),
+          }]);
+
         } else if (event.type === 'done') {
-          onUpdateTeamSteps(prev => prev.map(s => s.status === 'in-progress'
-            ? { ...s, status: 'completed' as const, duration: s.startedAt ? `${((Date.now() - s.startedAt) / 1000).toFixed(1)}s` : undefined }
-            : s));
-          onUpdateTeamAgents(prev => prev.map(a => a.status === 'working' ? { ...a, status: 'done', currentTask: '已完成' } : a));
+          // finished
         }
       });
     } catch {
       setMessages(prev => [...prev, {
         id: `error_${Date.now()}`,
         role: 'system',
-        content: 'Team 协作失败，请确认后端服务已启动。',
+        content: '编排失败，请确认后端服务已启动。',
         timestamp: now(),
       }]);
     } finally {
       setIsLoading(false);
+      setActivePlan(null);
     }
   };
 
@@ -424,40 +425,37 @@ export default function ProjectChat({ projectId, taskId, projectName, projectDes
 
   const chatTitle = taskId ? (taskName || '任务对话') : '主对话';
 
-  const getAgentInitial = (name?: string) => {
-    if (!name) return '?';
-    const clean = name.replace(/^\S+\s/, '');
-    return clean.charAt(0);
-  };
-
   return (
     <div className="h-full flex flex-col bg-bg">
       {/* Header */}
       <div className="h-14 bg-surface border-b border-border flex items-center justify-between px-5 shrink-0">
         <h2 className="font-semibold text-text text-base">{chatTitle}</h2>
-        <div className="flex items-center gap-3">
-          <div className="flex -space-x-1.5">
-            {['S', 'B', 'A', 'K'].map((letter, i) => (
-              <div
-                key={letter}
-                className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold text-white border-2 border-surface ${MEMBER_COLORS[i].bg}`}
-              >
-                {letter}
-              </div>
-            ))}
-          </div>
-          <span className="text-sm text-text-muted">5 members</span>
+        <div className="flex items-center gap-2 text-sm text-text-muted">
+          <Cpu className="w-4 h-4" />
+          <span>BizAgent + 3 SubAgents</span>
         </div>
       </div>
 
       {/* Messages */}
       <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
-        {/* Date separator */}
         <div className="flex justify-center">
           <span className="text-xs text-text-muted bg-bg px-3 py-1 rounded-full">Today</span>
         </div>
 
         {messages.map((msg) => {
+          if (msg.role === 'plan') {
+            return (
+              <div key={msg.id} className="flex justify-center">
+                <div className="bg-blue-50 dark:bg-blue-500/10 border border-blue-200 dark:border-blue-500/30 rounded-lg px-4 py-2 max-w-lg">
+                  <div className="flex items-center gap-2 text-xs text-blue-600 dark:text-blue-400 font-medium mb-1">
+                    <Cpu className="w-3.5 h-3.5" /> 任务规划
+                  </div>
+                  <div className="text-xs text-text-secondary">{msg.content}</div>
+                </div>
+              </div>
+            );
+          }
+
           if (msg.role === 'delegation') {
             return (
               <div key={msg.id} className="flex justify-center">
@@ -516,7 +514,7 @@ export default function ProjectChat({ projectId, taskId, projectName, projectDes
                       {msg.content === '' ? (
                         <div className="flex items-center gap-2 text-text-muted text-xs">
                           <Loader2 className="w-3 h-3 animate-spin" />
-                          正在汇总...
+                          正在处理...
                         </div>
                       ) : (
                         <MarkdownContent content={msg.content} />
@@ -530,14 +528,14 @@ export default function ProjectChat({ projectId, taskId, projectName, projectDes
           }
 
           if (msg.role === 'member') {
-            const initial = getAgentInitial(msg.agentName);
-            const agentLabel = msg.agentName?.replace(/^\S+\s/, '') || '成员';
+            const agentLabel = msg.agentName || '成员';
+            const slotNum = agentLabel.match(/#(\d)/)?.[1] || '?';
             const memberOutputs = parseOutputItems(msg.content, msg.id, msg.agentName, msg.timestamp);
 
             return (
               <div key={msg.id} className="flex gap-3">
                 <div className="w-8 h-8 rounded-full bg-indigo-500 flex items-center justify-center shrink-0">
-                  <span className="text-xs font-bold text-white">{initial}</span>
+                  <span className="text-xs font-bold text-white">{slotNum}</span>
                 </div>
                 <div className="max-w-[75%] min-w-0">
                   <div className="text-xs text-text-muted mb-1">{agentLabel}</div>
@@ -546,7 +544,7 @@ export default function ProjectChat({ projectId, taskId, projectName, projectDes
                       {msg.content === '' ? (
                         <div className="flex items-center gap-2 text-text-muted text-xs">
                           <Loader2 className="w-3 h-3 animate-spin" />
-                          正在执行数据提取...
+                          SubAgent 执行中...
                         </div>
                       ) : (
                         <MarkdownContent content={msg.content} />
@@ -562,11 +560,25 @@ export default function ProjectChat({ projectId, taskId, projectName, projectDes
           return null;
         })}
 
-        {isLoading && !memberMsgIds.current.size && (
+        {/* Active plan subtask status cards */}
+        {activePlan && activePlan.subtasks.length > 0 && (
+          <div className="space-y-1.5">
+            {activePlan.subtasks.map((st) => (
+              <SubTaskCard
+                key={st.slot_id}
+                slotId={st.slot_id}
+                description={st.description}
+                status={st.status as 'pending' | 'working' | 'completed' | 'failed'}
+              />
+            ))}
+          </div>
+        )}
+
+        {isLoading && !activePlan && (
           <div className="flex justify-center">
             <div className="flex items-center gap-2 text-xs text-text-muted bg-bg px-3 py-1.5 rounded-full">
               <Loader2 className="w-3 h-3 animate-spin" />
-              Team Leader 正在分析并分配任务...
+              BizAgent 正在分析任务...
             </div>
           </div>
         )}
@@ -589,7 +601,7 @@ export default function ProjectChat({ projectId, taskId, projectName, projectDes
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
-            placeholder="Message... (@ to mention or reference files)"
+            placeholder="输入消息，BizAgent 将自动编排 SubAgent 执行..."
             disabled={isLoading}
             className="flex-1 bg-transparent outline-none text-sm text-text disabled:opacity-50"
           />
@@ -610,7 +622,7 @@ export default function ProjectChat({ projectId, taskId, projectName, projectDes
             <span>project</span>
           </button>
           <div className="flex-1" />
-          <span className="text-xs text-text-muted">Default Permission</span>
+          <span className="text-xs text-text-muted">BizAgent Orchestrator</span>
         </div>
       </div>
     </div>

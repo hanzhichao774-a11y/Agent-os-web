@@ -14,7 +14,6 @@ from embeddings import (
 )
 from knowledge import _rebuild_knowledge
 from agents import _agents
-from teams import _teams
 
 router = APIRouter()
 
@@ -78,7 +77,6 @@ async def api_save_llm_settings(req: LLMSettingsRequest):
     conn.close()
 
     _agents.clear()
-    _teams.clear()
     return {"success": True}
 
 
@@ -169,7 +167,6 @@ async def api_save_embedding_settings(req: EmbeddingSettingsRequest):
 
     _rebuild_knowledge()
     _agents.clear()
-    _teams.clear()
     return {"success": True, "warning": "切换 Embedding 模型后，建议重新上传文档以重建索引。"}
 
 
@@ -241,7 +238,6 @@ async def api_save_reranker_settings(req: RerankerSettingsRequest):
 
     _rebuild_knowledge()
     _agents.clear()
-    _teams.clear()
     return {"success": True}
 
 

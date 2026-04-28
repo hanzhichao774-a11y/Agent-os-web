@@ -116,23 +116,31 @@ export async function streamAgentChat(
 }
 
 export interface TeamChatEvent {
-  type: 'leader_content' | 'member_delegated' | 'member_response' | 'member_streaming' | 'member_started' | 'done';
+  type: 'content' | 'plan_created' | 'subtask_started' | 'subtask_completed' | 'subtask_failed' | 'plan_completed' | 'summary' | 'error' | 'done';
   content?: string;
-  agent_name?: string;
-  task?: string;
+  plan_id?: string;
+  execution_mode?: string;
+  reasoning?: string;
+  subtasks?: Array<{ slot_id: number; description: string }>;
+  slot_id?: number;
+  description?: string;
+  result?: string;
+  token_usage?: { input_tokens: number; output_tokens: number; total_tokens: number };
+  status?: string;
+  summary?: string;
   done?: boolean;
 }
 
 /**
- * 向 Team 发送消息，通过 SSE 流式接收协作响应（含成员事件）。
+ * 向编排引擎发送消息，通过 SSE 流式接收响应。
  */
-export async function streamTeamChat(
+export async function streamOrchestratorChat(
   projectId: string,
   message: string,
   sessionId: string,
   onEvent: (event: TeamChatEvent) => void,
 ): Promise<void> {
-  const response = await fetch(`${API_BASE}/api/teams/${projectId}/chat`, {
+  const response = await fetch(`${API_BASE}/api/orchestrator/${projectId}/chat`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ message, session_id: sessionId }),
@@ -268,39 +276,38 @@ export async function setAgentTools(agentId: string, skillIds: string[]): Promis
   return res.json();
 }
 
-/** 创建新 Agent（数字员工） */
-export async function createAgent(data: {
-  name: string;
-  avatar?: string;
-  description?: string;
-  instructions?: string[];
-  skill_ids?: string[];
-  join_team?: boolean;
-}): Promise<{ success: boolean; agent?: AgentInfo; error?: string }> {
-  const res = await fetch(`${API_BASE}/api/agents`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(data),
-  });
+/** SubAgent 工位状态 */
+export interface WorkerSlotStatus {
+  slot_id: number;
+  status: 'idle' | 'working' | 'completed' | 'error';
+  current_task: string | null;
+  result: string | null;
+  error: string | null;
+  input_tokens: number;
+  output_tokens: number;
+  total_tokens: number;
+  started_at: number | null;
+  completed_at: number | null;
+  cumulative_input_tokens: number;
+  cumulative_output_tokens: number;
+  cumulative_total_tokens: number;
+  tasks_completed: number;
+}
+
+/** 获取 SubAgent 工位实时状态 */
+export async function fetchWorkerStatus(): Promise<{ slots: WorkerSlotStatus[] }> {
+  const res = await fetch(`${API_BASE}/api/workers/status`);
+  if (!res.ok) return { slots: [] };
   return res.json();
 }
 
-/** 删除自定义 Agent */
-export async function deleteAgent(agentId: string): Promise<{ success: boolean; error?: string }> {
-  const res = await fetch(`${API_BASE}/api/agents/${agentId}`, { method: 'DELETE' });
-  return res.json();
-}
-
-/** 更新 Agent 配置（描述、指令） */
-export async function updateAgentConfig(
-  agentId: string,
-  config: { description?: string; instructions?: string[] },
-): Promise<{ success: boolean; error?: string }> {
-  const res = await fetch(`${API_BASE}/api/agents/${agentId}/config`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(config),
-  });
+/** 获取 SubAgent token 消耗统计 */
+export async function fetchWorkerStats(): Promise<{
+  global: { input_tokens: number; output_tokens: number; total_tokens: number; tasks_completed: number };
+  slots: Array<{ slot_id: number; input_tokens: number; output_tokens: number; total_tokens: number; tasks_completed: number }>;
+}> {
+  const res = await fetch(`${API_BASE}/api/workers/stats`);
+  if (!res.ok) return { global: { input_tokens: 0, output_tokens: 0, total_tokens: 0, tasks_completed: 0 }, slots: [] };
   return res.json();
 }
 

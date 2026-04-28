@@ -6,7 +6,7 @@ from fastapi import APIRouter
 from config import SESSIONS_DB
 from database import _load_chat_messages
 from utils import clean_content
-from agents import AGENT_CONFIGS, resolve_agent_display
+from agents import AGENT_CONFIGS
 
 router = APIRouter()
 
@@ -118,13 +118,13 @@ async def api_get_session_messages(session_id: str):
                     mr_content = clean_content(mr_content) if mr_content else ""
                     mr_name = mr.get("agent_name", "") if isinstance(mr, dict) else ""
                     mr_id = mr.get("agent_id", "") if isinstance(mr, dict) else ""
-                    avatar, display_name = resolve_agent_display(mr_id)
+                    display_name = mr_name or mr_id or "成员"
                     if mr_content:
                         messages.append({
                             "id": f"hist_member_{run.get('run_id', '')}_{mr_id}",
                             "role": "assistant",
                             "content": mr_content,
-                            "agent_name": f"{avatar} {display_name}" if mr_id else mr_name,
+                            "agent_name": display_name,
                             "timestamp": run.get("created_at", 0),
                         })
             elif assistant_content:

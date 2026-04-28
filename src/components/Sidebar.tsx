@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
-  Home, Bot, Wrench, Plus, Bell, Moon, Sun, Settings,
+  Home, Wrench, Plus, Bell, Moon, Sun, Settings,
   ChevronLeft, ChevronRight, ChevronDown, Trash2, MoreHorizontal, MessageCircle, X
 } from 'lucide-react';
 import { createProject, deleteProject, fetchTasks, createTask, deleteTask } from '../services/api';
@@ -19,7 +19,6 @@ interface SidebarProps {
 
 const navItems = [
   { key: 'home', label: '主页', icon: Home },
-  { key: 'agent', label: '数字员工', icon: Bot },
   { key: 'skill', label: 'Skills', icon: Wrench },
 ];
 

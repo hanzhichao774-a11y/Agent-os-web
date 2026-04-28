@@ -4,6 +4,41 @@
 
 ---
 
+## [2026-04-28] 动态编排架构 — 去除固定数字员工，SubAgent 工位制
+
+### 架构重构
+- **去除固定"数字员工"体系**：删除 `teams.py`、`AgentPage.tsx`，移除 a1-a7 七个固定 Agent 配置，仅保留 BizAgent（管理智能体）和 SkillEngineer
+- **引入 3 工位 SubAgent 动态编排**：
+  - 新增 `worker_pool.py`：管理 3 个 SubAgent 工位的状态（idle/working/completed/error）、token 消耗统计、累计任务数
+  - 新增 `orchestrator.py`：LLM 驱动的任务规划引擎，支持 single / serial / parallel 三种执行模式
+  - BizAgent 作为中央编排者，分析用户请求后自动拆解子任务、分配工位、聚合结果
+- **动态 Agent 创建**：`agents.py` 新增 `create_dynamic_agent()` 函数，根据任务所需能力（内置工具 + 已注册技能）动态组装临时 Agent，不再缓存
+- **能力注册表**：`orchestrator.py` 定义 `CAPABILITY_REGISTRY`，统一映射 pdf_generation / chart_generation / excel_generation / image_processing / http_client 等能力 ID 到对应工具函数
+
+### 新增
+- **`backend/orchestrator.py`**：任务规划（`plan_task`）+ 子任务执行（`_run_subtask`）+ 计划调度（`execute_plan`），含 120 秒子任务超时保护
+- **`backend/worker_pool.py`**：SubAgent 工位状态管理、slot 分配/释放/失败/重置、token 统计（单次 + 累计）
+- **`backend/routes/workers.py`**：`GET /api/workers/status`（实时工位状态）、`GET /api/workers/stats`（token 消耗统计）
+- **智能编排入口**：`routes/chat.py` 新增 `orchestrator_chat` 端点，替代原有 `team_chat`；内置关键词启发式判断（`_needs_orchestration`），简单问答直接由 BizAgent 回答，复杂任务触发 LLM 规划
+- **Dashboard 工位面板**：首页展示 3 个 SubAgent 工位实时状态卡片 + 全局 token 消耗面板，轮询刷新
+- **SSE 事件流**：新增 `plan_created`、`subtask_started`、`subtask_completed`、`subtask_failed`、`summary`、`plan_completed` 事件类型
+
+### 优化
+- **主对话去重**：`subtask_completed` 不再在主对话中生成独立消息，仅保留 BizAgent 最终汇总，避免内容重复
+- **右侧产出去重**：`extractOutputs` 仅从 BizAgent 汇总（leader 角色）中提取文件产出，不再从 SubAgent 原始结果中提取
+- **任务规划文案用户友好化**：规划引擎 prompt 要求使用通俗语言描述（如"正在为您生成 PDF 报告"），禁止出现工位、能力 ID、slot 等技术术语
+- **BizAgent 工具集精简**：移除 `_global_create_agent` / `_global_delete_agent` / `_global_list_agents`，新增 `_plan_task` / `_get_worker_status` / `_get_capabilities`
+- **工作流模板简化**：所有预设工作流改为由 BizAgent 统一调度执行
+
+### 删除
+- `backend/teams.py`：Team 多 Agent 路由协作模块（被编排器替代）
+- `src/components/AgentPage.tsx`：数字员工管理页面
+- Sidebar 中"数字员工"导航项
+- `agents_api.py` 中 Agent CRUD 端点（create/delete/update/setTools）
+- `api.ts` 中 Agent CRUD 前端函数
+
+---
+
 ## [2026-04-28] 任务级文件隔离 + 新文件格式支持 + 知识检索增强
 
 ### 新增

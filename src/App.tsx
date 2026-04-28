@@ -4,7 +4,6 @@ import Dashboard from './components/Dashboard';
 import BizAgent from './components/BizAgent';
 import ProjectChat from './components/ProjectChat';
 import ProjectDashboard from './components/ProjectDashboard';
-import AgentPage from './components/AgentPage';
 import SkillPage from './components/SkillPage';
 import RightPanel from './components/RightPanel';
 import SettingsModal from './components/SettingsModal';
@@ -35,14 +34,13 @@ export interface OutputItem {
   timestamp: string;
 }
 
-type ViewType = 'home' | 'project' | 'agent' | 'skill';
+type ViewType = 'home' | 'project' | 'skill';
 
 function App() {
   const [activeView, setActiveView] = useState<ViewType>('home');
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
   const [selectedSkillId, setSelectedSkillId] = useState<string | null>(null);
-  const [selectedAgentName, setSelectedAgentName] = useState<string | null>(null);
 
   const [teamAgents, setTeamAgents] = useState<TeamAgentStatus[]>([]);
   const [teamSteps, setTeamSteps] = useState<TeamTaskStep[]>([]);
@@ -70,7 +68,6 @@ function App() {
       setActiveTaskId(null);
     }
     if (view !== 'skill') setSelectedSkillId(null);
-    if (view !== 'agent') setSelectedAgentName(null);
   };
 
   const handleResetTeamState = useCallback(() => {
@@ -88,7 +85,6 @@ function App() {
 
   const isProjectView = activeView === 'project' && activeProjectId;
   const isHomeView = activeView === 'home';
-  const isAgentView = activeView === 'agent';
   const isSkillView = activeView === 'skill';
 
   const isProjectDashboard = isProjectView && activeTaskId === null;
@@ -110,7 +106,6 @@ function App() {
         onOpenSettings={() => setShowSettings(true)}
       />
 
-      {/* Center content area */}
       <div className="flex-1 flex min-w-0 overflow-hidden">
         {isHomeView ? (
           <div className="flex-1 min-w-0 overflow-hidden">
@@ -158,10 +153,6 @@ function App() {
               />
             </div>
           </>
-        ) : isAgentView ? (
-          <div className="flex-1 min-w-0 overflow-hidden">
-            <AgentPage onSelectAgent={setSelectedAgentName} selectedAgentName={selectedAgentName} />
-          </div>
         ) : isSkillView ? (
           <div className="flex-1 min-w-0 overflow-hidden">
             <SkillPage
@@ -176,10 +167,9 @@ function App() {
         )}
       </div>
 
-      {/* BizAgent: fixed right panel, hidden in project view */}
       {showBizAgent && (
         <div className="w-80 shrink-0">
-          <BizAgent activeView={activeView} selectedAgentName={selectedAgentName} onClearAgent={() => setSelectedAgentName(null)} selectedSkillId={selectedSkillId} onClearSkill={() => setSelectedSkillId(null)} />
+          <BizAgent activeView={activeView} selectedSkillId={selectedSkillId} onClearSkill={() => setSelectedSkillId(null)} />
         </div>
       )}
 

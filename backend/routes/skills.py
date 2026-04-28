@@ -11,7 +11,7 @@ from schemas import ChatRequest, SkillCreateRequest, SkillRunRequest
 from config import SKILLS_DIR
 from llm import create_model
 from skill_manager import _skill_registry, scan_skills
-from agents import AGENT_CONFIGS, _agent_tools, get_agent, invalidate_agent
+from agents import AGENT_CONFIGS, get_agent, invalidate_agent
 from utils import clean_delta
 
 router = APIRouter()
@@ -28,11 +28,7 @@ async def api_list_skills():
             "category": s["meta"].get("category", "api"),
             "description": s["meta"].get("description", ""),
             "params": s["params"],
-            "mounted_agents": [
-                {"id": aid, "name": AGENT_CONFIGS[aid]["name"]}
-                for aid, sids in _agent_tools.items()
-                if s["id"] in sids and aid in AGENT_CONFIGS
-            ],
+            "mounted_agents": [],
         }
         for s in _skill_registry.values()
     ]
@@ -105,10 +101,6 @@ async def api_delete_skill(skill_id: str):
     filepath = SKILLS_DIR / f"{skill_id}.py"
     if filepath.exists():
         filepath.unlink()
-    for aid, sids in _agent_tools.items():
-        if skill_id in sids:
-            sids.remove(skill_id)
-            invalidate_agent(aid)
     _skill_registry.pop(skill_id, None)
     return {"success": True, "skill_id": skill_id}
 
@@ -116,30 +108,15 @@ async def api_delete_skill(skill_id: str):
 # --- Skill Management Agent ---
 
 def _skill_tool_mount(skill_id: str, agent_id: str) -> str:
-    """将技能挂载到指定 Agent。"""
-    if agent_id not in AGENT_CONFIGS:
-        return f"错误：Agent [{agent_id}] 不存在。可用 Agent：{', '.join(k + '(' + v['name'] + ')' for k, v in AGENT_CONFIGS.items() if k != 'skill_engineer')}"
+    """将技能挂载到指定 Agent（动态编排系统中技能自动可用）。"""
     if skill_id not in _skill_registry:
         return f"错误：技能 [{skill_id}] 不存在"
-    current = _agent_tools.get(agent_id, [])
-    if skill_id in current:
-        return f"技能 [{skill_id}] 已经挂载在 {AGENT_CONFIGS[agent_id]['name']} 上了"
-    _agent_tools[agent_id] = current + [skill_id]
-    invalidate_agent(agent_id)
-    return f"成功：已将技能挂载到 {AGENT_CONFIGS[agent_id]['name']}（{agent_id}）"
+    return f"成功：技能 [{skill_id}] 已注册，在动态编排中可自动使用"
 
 
 def _skill_tool_unmount(skill_id: str, agent_id: str) -> str:
-    """从指定 Agent 卸载技能。"""
-    if agent_id not in AGENT_CONFIGS:
-        return f"错误：Agent [{agent_id}] 不存在"
-    current = _agent_tools.get(agent_id, [])
-    if skill_id not in current:
-        return f"技能 [{skill_id}] 未挂载在 {AGENT_CONFIGS[agent_id]['name']} 上"
-    current.remove(skill_id)
-    _agent_tools[agent_id] = current
-    invalidate_agent(agent_id)
-    return f"成功：已从 {AGENT_CONFIGS[agent_id]['name']} 卸载技能"
+    """卸载技能（动态编排系统中无需手动卸载）。"""
+    return f"提示：动态编排系统中技能自动按需分配，无需手动卸载"
 
 
 def _skill_tool_run(skill_id: str, params_json: str) -> str:
@@ -166,18 +143,14 @@ def _skill_tool_run(skill_id: str, params_json: str) -> str:
 
 
 def _skill_tool_delete(skill_id: str) -> str:
-    """删除技能文件并清除所有 Agent 绑定。"""
+    """删除技能文件。"""
     if skill_id not in _skill_registry:
         return f"错误：技能 [{skill_id}] 不存在"
     filepath = SKILLS_DIR / f"{skill_id}.py"
     if filepath.exists():
         filepath.unlink()
-    for aid, sids in _agent_tools.items():
-        if skill_id in sids:
-            sids.remove(skill_id)
-            invalidate_agent(aid)
     _skill_registry.pop(skill_id, None)
-    return f"成功：技能 [{skill_id}] 已删除，相关 Agent 绑定已清除"
+    return f"成功：技能 [{skill_id}] 已删除"
 
 
 async def _skill_tool_modify(skill_id: str, instruction: str) -> str:
@@ -258,16 +231,10 @@ def _build_skill_manager_agent(skill_id: str | None):
         s = _skill_registry[skill_id]
         meta = s["meta"]
         params_desc = ", ".join(f"{p['name']}:{p['type']}" for p in s["params"]) or "无参数"
-        mounted = [
-            f"{AGENT_CONFIGS[aid]['name']}({aid})"
-            for aid, sids in _agent_tools.items()
-            if skill_id in sids and aid in AGENT_CONFIGS
-        ]
         context_lines.append(f"当前技能：{meta['name']}（ID: {skill_id}）")
         context_lines.append(f"描述：{meta.get('description', '')}")
         context_lines.append(f"分类：{meta.get('category', '')}")
         context_lines.append(f"参数：{params_desc}")
-        context_lines.append(f"已挂载到：{', '.join(mounted) if mounted else '未挂载'}")
     else:
         context_lines.append("当前未选中特定技能，你可以帮用户创建新技能。")
 

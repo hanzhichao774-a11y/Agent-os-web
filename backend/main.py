@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-app = FastAPI(title="Agent OS API", version="2.0.0")
+app = FastAPI(title="Agent OS API", version="3.0.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -19,6 +19,7 @@ from routes.projects import router as projects_router
 from routes.knowledge_api import router as knowledge_router
 from routes.stats import router as stats_router
 from routes.workflows import router as workflows_router
+from routes.workers import router as workers_router
 
 app.include_router(settings_router)
 app.include_router(sessions_router)
@@ -29,3 +30,4 @@ app.include_router(projects_router)
 app.include_router(knowledge_router)
 app.include_router(stats_router)
 app.include_router(workflows_router)
+app.include_router(workers_router)

@@ -1,3 +1,5 @@
+"""BizAgent 全局工具集：系统查询 + 编排控制 + 技能/项目管理。"""
+
 import time
 from datetime import datetime, timezone
 
@@ -5,23 +7,6 @@ from config import WORKSPACE_DIR
 from database import _get_projects_conn
 from skill_manager import _skill_registry, scan_skills
 from knowledge import list_documents
-from agents import (
-    AGENT_CONFIGS, _agent_tools, _agents,
-    invalidate_agent, TEAM_MEMBER_IDS,
-)
-
-
-def _global_list_agents() -> str:
-    """列出系统中所有可用的 Agent 及其能力描述。"""
-    lines = []
-    for aid, cfg in AGENT_CONFIGS.items():
-        if aid == "skill_engineer":
-            continue
-        tools = cfg.get("builtin_tools", [])
-        custom = [sid for sid in _agent_tools.get(aid, []) if sid in _skill_registry]
-        tool_str = ", ".join(tools + custom) if (tools or custom) else "无"
-        lines.append(f"- **{cfg['name']}** (ID: {aid}): {cfg.get('description', '')} | 工具: {tool_str}")
-    return f"当前系统共有 {len(lines)} 个 Agent：\n" + "\n".join(lines)
 
 
 def _global_list_skills() -> str:
@@ -32,9 +17,7 @@ def _global_list_skills() -> str:
     lines = []
     for s in _skill_registry.values():
         meta = s["meta"]
-        mounted = [AGENT_CONFIGS[aid]["name"] for aid, sids in _agent_tools.items() if s["id"] in sids and aid in AGENT_CONFIGS]
-        mount_str = ", ".join(mounted) if mounted else "未挂载"
-        lines.append(f"- **{meta['name']}** (ID: {s['id']}): {meta.get('description', '')} | 挂载: {mount_str}")
+        lines.append(f"- **{meta['name']}** (ID: {s['id']}): {meta.get('description', '')}")
     return f"当前系统共有 {len(lines)} 个技能：\n" + "\n".join(lines)
 
 
@@ -44,9 +27,7 @@ def _global_list_projects() -> str:
     rows = conn.execute("SELECT id, name, description, status, created_at FROM projects ORDER BY created_at DESC").fetchall()
     if not rows:
         return "当前没有项目。"
-    lines = []
-    for r in rows:
-        lines.append(f"- **{r[1]}** (ID: {r[0]}): {r[2]} | 状态: {r[3]}")
+    lines = [f"- **{r[1]}** (ID: {r[0]}): {r[2]} | 状态: {r[3]}" for r in rows]
     return f"当前系统共有 {len(lines)} 个项目：\n" + "\n".join(lines)
 
 
@@ -73,14 +54,12 @@ def _global_list_tasks(project_id: str) -> str:
     conn.close()
     if not rows:
         return f"项目「{project['name']}」(ID: {project_id}) 当前没有子任务。"
-    lines = []
-    for r in rows:
-        lines.append(f"- **{r[1]}** (ID: {r[0]}) | 创建时间: {r[2]}")
+    lines = [f"- **{r[1]}** (ID: {r[0]}) | 创建时间: {r[2]}" for r in rows]
     return f"项目「{project['name']}」共有 {len(lines)} 个子任务：\n" + "\n".join(lines)
 
 
 def _global_list_workspace_files() -> str:
-    """列出工作区中所有产出文件（Agent 生成的 PDF、图表、Excel 等）。"""
+    """列出工作区中所有产出文件。"""
     if not WORKSPACE_DIR.exists():
         return "工作区目录不存在。"
     files = sorted(WORKSPACE_DIR.glob("*"), key=lambda f: f.stat().st_mtime, reverse=True)
@@ -98,13 +77,11 @@ def _global_list_workspace_files() -> str:
 def _global_system_stats() -> str:
     """获取系统整体统计概览。"""
     scan_skills()
-    agent_count = sum(1 for k in AGENT_CONFIGS if k != "skill_engineer")
     skill_count = len(_skill_registry)
     docs = list_documents()
     workspace_files = list(WORKSPACE_DIR.glob("*")) if WORKSPACE_DIR.exists() else []
     return (
         f"系统概览：\n"
-        f"- Agent 数量: {agent_count}\n"
         f"- 技能数量: {skill_count}\n"
         f"- 知识库文档: {len(docs)}\n"
         f"- 工作区文件: {len(workspace_files)}"
@@ -112,75 +89,28 @@ def _global_system_stats() -> str:
 
 
 def _global_mount_skill(skill_id: str, agent_id: str) -> str:
-    """将指定技能挂载到指定 Agent。需提供 skill_id 和 agent_id。"""
+    """将指定技能挂载到 BizAgent（agent_id 应为 'global'）。"""
+    from agents import AGENT_CONFIGS, invalidate_agent
     if agent_id not in AGENT_CONFIGS:
-        agent_list = ", ".join(f"{k}({v['name']})" for k, v in AGENT_CONFIGS.items() if k != "skill_engineer")
-        return f"错误：Agent [{agent_id}] 不存在。可用 Agent：{agent_list}"
+        return f"错误：Agent [{agent_id}] 不存在。可用：global"
     if skill_id not in _skill_registry:
         scan_skills()
         if skill_id not in _skill_registry:
             skill_list = ", ".join(f"{s['id']}({s['meta']['name']})" for s in _skill_registry.values())
             return f"错误：技能 [{skill_id}] 不存在。可用技能：{skill_list}"
-    current = _agent_tools.get(agent_id, [])
-    if skill_id in current:
-        return f"技能 [{skill_id}] 已经挂载在 {AGENT_CONFIGS[agent_id]['name']} 上了"
-    _agent_tools[agent_id] = current + [skill_id]
     invalidate_agent(agent_id)
-    from teams import _teams
-    _teams.clear()
-    return f"成功：已将技能 {_skill_registry[skill_id]['meta']['name']}({skill_id}) 挂载到 {AGENT_CONFIGS[agent_id]['name']}（{agent_id}）"
+    return f"成功：技能 {_skill_registry[skill_id]['meta']['name']} 已就绪，可在任务编排中使用"
 
 
 def _global_unmount_skill(skill_id: str, agent_id: str) -> str:
-    """从指定 Agent 卸载技能。需提供 skill_id 和 agent_id。"""
-    if agent_id not in AGENT_CONFIGS:
-        return f"错误：Agent [{agent_id}] 不存在"
-    current = _agent_tools.get(agent_id, [])
-    if skill_id not in current:
-        return f"技能 [{skill_id}] 未挂载在 {AGENT_CONFIGS[agent_id]['name']} 上"
-    current.remove(skill_id)
-    _agent_tools[agent_id] = current
+    """卸载技能。"""
+    from agents import invalidate_agent
     invalidate_agent(agent_id)
-    from teams import _teams
-    _teams.clear()
-    return f"成功：已从 {AGENT_CONFIGS[agent_id]['name']} 卸载技能 [{skill_id}]"
-
-
-def _global_create_agent(name: str, description: str = "", instructions: str = "") -> str:
-    """创建一个新的自定义 Agent（数字员工）。name 为 Agent 名称，description 为描述，instructions 为指令（多条用换行分隔）。"""
-    agent_id = f"custom_{int(time.time() * 1000)}"
-    instr_list = [line.strip() for line in instructions.split("\n") if line.strip()] if instructions else [f"你是{name}，请根据用户需求提供帮助。"]
-    config = {
-        "name": name,
-        "avatar": "🤖",
-        "description": description or name,
-        "capabilities": [],
-        "builtin_tools": [],
-        "instructions": instr_list,
-    }
-    AGENT_CONFIGS[agent_id] = config
-    return f"成功：已创建 Agent「{name}」（ID: {agent_id}）"
-
-
-def _global_delete_agent(agent_id: str) -> str:
-    """删除一个自定义 Agent。只能删除 ID 以 custom_ 开头的 Agent。"""
-    if not agent_id.startswith("custom_"):
-        return f"错误：内置 Agent [{agent_id}] 不允许删除，只能删除自定义 Agent（ID 以 custom_ 开头）"
-    if agent_id not in AGENT_CONFIGS:
-        return f"错误：Agent [{agent_id}] 不存在"
-    name = AGENT_CONFIGS[agent_id]["name"]
-    del AGENT_CONFIGS[agent_id]
-    _agent_tools.pop(agent_id, None)
-    _agents.pop(agent_id, None)
-    if agent_id in TEAM_MEMBER_IDS:
-        TEAM_MEMBER_IDS.remove(agent_id)
-    from teams import _teams
-    _teams.clear()
-    return f"成功：已删除 Agent「{name}」（{agent_id}）"
+    return f"成功：已卸载技能 [{skill_id}]"
 
 
 def _global_create_project(name: str, description: str = "") -> str:
-    """创建一个新项目。name 为项目名称，description 为描述。"""
+    """创建一个新项目。"""
     import uuid
     project_id = f"p{uuid.uuid4().hex[:8]}"
     now = datetime.now(timezone.utc).isoformat()
@@ -195,7 +125,7 @@ def _global_create_project(name: str, description: str = "") -> str:
 
 
 def _global_delete_project(project_id: str) -> str:
-    """删除一个项目及其所有子任务。需提供 project_id。"""
+    """删除一个项目及其所有子任务。"""
     conn = _get_projects_conn()
     row = conn.execute("SELECT name FROM projects WHERE id = ?", (project_id,)).fetchone()
     if not row:
@@ -209,8 +139,55 @@ def _global_delete_project(project_id: str) -> str:
     return f"成功：已删除项目「{name}」（{project_id}）及其所有子任务"
 
 
+# ---------------------------------------------------------------------------
+# 编排工具（BizAgent 调用来触发编排引擎）
+# ---------------------------------------------------------------------------
+
+def _plan_task(message: str) -> str:
+    """将用户任务交给编排引擎执行（BizAgent 调用此工具触发 SubAgent 工作）。
+    message: 用户的原始任务描述。
+    返回编排状态信息。"""
+    import worker_pool
+    available = worker_pool.get_available_slots()
+    if not available:
+        return "当前没有空闲工位，请等待 SubAgent 完成后重试。"
+    return f"任务已提交编排引擎，{len(available)} 个空闲工位可用。编排结果将通过实时流返回。"
+
+
+def _get_worker_status() -> str:
+    """查看 3 个 SubAgent 工位的当前状态和 token 消耗。"""
+    import worker_pool
+    slots = worker_pool.get_all_status()
+    lines = []
+    for s in slots:
+        status_label = {
+            "idle": "空闲",
+            "working": "工作中",
+            "completed": "已完成",
+            "error": "出错",
+        }.get(s["status"], s["status"])
+        line = f"- 工位 {s['slot_id']}: {status_label}"
+        if s["current_task"]:
+            line += f" | 任务: {s['current_task'][:50]}"
+        if s["cumulative_total_tokens"] > 0:
+            line += f" | 累计 token: {s['cumulative_total_tokens']}"
+        lines.append(line)
+    stats = worker_pool.get_token_stats()
+    lines.append(f"\n全局累计: {stats['global']['total_tokens']} tokens, {stats['global']['tasks_completed']} 个任务")
+    return "SubAgent 工位状态：\n" + "\n".join(lines)
+
+
+def _get_capabilities() -> str:
+    """查看系统当前所有可用能力清单（内置工具 + 已注册技能）。"""
+    from orchestrator import get_full_capability_list
+    return "系统可用能力：\n" + get_full_capability_list()
+
+
+# ---------------------------------------------------------------------------
+# 工具列表导出
+# ---------------------------------------------------------------------------
+
 _GLOBAL_TOOLS = [
-    _global_list_agents,
     _global_list_skills,
     _global_list_projects,
     _global_list_tasks,
@@ -219,10 +196,11 @@ _GLOBAL_TOOLS = [
     _global_system_stats,
     _global_mount_skill,
     _global_unmount_skill,
-    _global_create_agent,
-    _global_delete_agent,
     _global_create_project,
     _global_delete_project,
+    _plan_task,
+    _get_worker_status,
+    _get_capabilities,
 ]
 
 

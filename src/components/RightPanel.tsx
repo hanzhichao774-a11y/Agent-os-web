@@ -3,6 +3,11 @@ import { Circle, FileText, Network, Download, ExternalLink } from 'lucide-react'
 import { fetchTaskFiles, getWorkspaceFileUrl } from '../services/api';
 import type { TaskFile } from '../services/api';
 import type { OutputItem } from '../App';
+import WorkflowPanel from './WorkflowPanel';
+
+interface ActivePlanData {
+  subtasks: Array<{ slot_id: number; description: string; status: string }>;
+}
 
 interface RightPanelProps {
   activeView: string;
@@ -11,6 +16,7 @@ interface RightPanelProps {
   teamAgents: unknown[];
   teamSteps: unknown[];
   outputs: OutputItem[];
+  activePlan?: ActivePlanData | null;
 }
 
 type TabKey = 'data' | 'files' | 'graph';
@@ -305,7 +311,7 @@ function KnowledgeGraph() {
   );
 }
 
-export default function RightPanel({ activeView, activeProjectId, activeTaskId, outputs }: RightPanelProps) {
+export default function RightPanel({ activeView, activeProjectId, activeTaskId, outputs, activePlan }: RightPanelProps) {
   const [activeTab, setActiveTab] = useState<TabKey>('data');
 
   const isProjectView = activeView === 'project' && activeProjectId;
@@ -336,7 +342,14 @@ export default function RightPanel({ activeView, activeProjectId, activeTaskId, 
 
       {/* Tab content */}
       <div className="flex-1 min-h-0 overflow-hidden">
-        {activeTab === 'data' && <DataOutputPanel outputs={outputs} />}
+        {activeTab === 'data' && (
+          <div className="h-full flex flex-col overflow-hidden">
+            <WorkflowPanel activePlan={activePlan ?? null} />
+            <div className="flex-1 min-h-0 overflow-y-auto">
+              <DataOutputPanel outputs={outputs} />
+            </div>
+          </div>
+        )}
         {activeTab === 'files' && <FilesPanel outputs={outputs} projectId={activeProjectId!} taskId={activeTaskId} />}
         {activeTab === 'graph' && <KnowledgeGraph />}
       </div>

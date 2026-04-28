@@ -6,6 +6,10 @@ import { streamOrchestratorChat, uploadDocument, fetchTasks, fetchSessionMessage
 import type { TeamChatEvent, TaskInfo } from '../services/api';
 import type { TeamAgentStatus, TeamTaskStep, OutputItem } from '../App';
 
+export interface ActivePlanState {
+  subtasks: Array<{ slot_id: number; description: string; status: string }>;
+}
+
 interface ProjectChatProps {
   projectId: string;
   taskId: string | null;
@@ -15,6 +19,7 @@ interface ProjectChatProps {
   onUpdateTeamAgents: (updater: (prev: TeamAgentStatus[]) => TeamAgentStatus[]) => void;
   onUpdateTeamSteps: (updater: (prev: TeamTaskStep[]) => TeamTaskStep[]) => void;
   onOutputsChange: (items: OutputItem[]) => void;
+  onActivePlanChange?: (plan: ActivePlanState | null) => void;
 }
 
 interface ChatMsg {
@@ -160,7 +165,7 @@ function SubTaskCard({ slotId, description, status }: { slotId: number; descript
   );
 }
 
-export default function ProjectChat({ projectId, taskId, projectName, projectDescription, onResetTeamState, onUpdateTeamAgents, onUpdateTeamSteps, onOutputsChange }: ProjectChatProps) {
+export default function ProjectChat({ projectId, taskId, projectName, projectDescription, onResetTeamState, onUpdateTeamAgents, onUpdateTeamSteps, onOutputsChange, onActivePlanChange }: ProjectChatProps) {
   const [messages, setMessages] = useState<ChatMsg[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -193,6 +198,10 @@ export default function ProjectChat({ projectId, taskId, projectName, projectDes
     const outputs = extractOutputs();
     onOutputsChange(outputs);
   }, [messages, extractOutputs, onOutputsChange]);
+
+  useEffect(() => {
+    onActivePlanChange?.(activePlan);
+  }, [activePlan, onActivePlanChange]);
 
   useEffect(() => {
     const newSessionId = `team_${projectId}_task_${taskId || 'main'}`;

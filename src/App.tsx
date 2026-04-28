@@ -3,6 +3,7 @@ import Sidebar from './components/Sidebar';
 import Dashboard from './components/Dashboard';
 import BizAgent from './components/BizAgent';
 import ProjectChat from './components/ProjectChat';
+import type { ActivePlanState } from './components/ProjectChat';
 import ProjectDashboard from './components/ProjectDashboard';
 import SkillPage from './components/SkillPage';
 import RightPanel from './components/RightPanel';
@@ -45,6 +46,7 @@ function App() {
   const [teamAgents, setTeamAgents] = useState<TeamAgentStatus[]>([]);
   const [teamSteps, setTeamSteps] = useState<TeamTaskStep[]>([]);
   const [chatOutputs, setChatOutputs] = useState<OutputItem[]>([]);
+  const [activePlan, setActivePlan] = useState<ActivePlanState | null>(null);
   const [showSettings, setShowSettings] = useState(false);
 
   const [projects, setProjects] = useState<ProjectInfo[]>([]);
@@ -140,6 +142,7 @@ function App() {
                 onUpdateTeamAgents={handleUpdateTeamAgents}
                 onUpdateTeamSteps={handleUpdateTeamSteps}
                 onOutputsChange={setChatOutputs}
+                onActivePlanChange={setActivePlan}
               />
             </div>
             <div className="flex-[2] min-w-0 overflow-hidden">
@@ -150,6 +153,7 @@ function App() {
                 teamAgents={teamAgents}
                 teamSteps={teamSteps}
                 outputs={chatOutputs}
+                activePlan={activePlan}
               />
             </div>
           </>

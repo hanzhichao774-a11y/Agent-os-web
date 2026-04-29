@@ -243,14 +243,14 @@ export default function ProjectChat({ projectId, taskId, projectName, projectDes
             {
               id: `sys_${newSessionId}`,
               role: 'system',
-              content: `BizAgent 已就绪，项目：${projectName}`,
+              content: `BizAgent 已就绪，项目：${projectName}${projectDescription ? `\n${projectDescription}` : ''}`,
               timestamp: now(),
             },
           ]);
         }
       });
     }
-  }, [projectId, projectName, taskId]);
+  }, [projectDescription, projectId, projectName, taskId]);
 
   function now() {
     return new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });

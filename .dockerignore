@@ -1,0 +1,17 @@
+node_modules
+dist
+dist-ssr
+
+.git
+.gitignore
+.DS_Store
+*.log
+
+backend/.venv
+backend/__pycache__
+backend/data
+backend/knowledge/docs
+backend/workspace
+backend/.env
+__pycache__
+*.pyc

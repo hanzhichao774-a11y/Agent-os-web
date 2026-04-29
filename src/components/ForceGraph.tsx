@@ -1,4 +1,4 @@
-import { useRef, useEffect, useCallback, useMemo } from 'react';
+import { useRef, useEffect, useCallback } from 'react';
 
 export interface ForceNode {
   id: string;
@@ -100,9 +100,6 @@ export default function ForceGraph({
   const prevNodeIdsRef = useRef<Set<string>>(new Set());
 
   propsRef.current = { expandedIds, expandableIds, onNodeClick, onNodeDoubleClick };
-
-  const stableExpandedIds = useMemo(() => expandedIds, [expandedIds]);
-  const stableExpandableIds = useMemo(() => expandableIds, [expandableIds]);
 
   useEffect(() => {
     const canvas = canvasRef.current;

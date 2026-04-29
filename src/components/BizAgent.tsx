@@ -303,9 +303,16 @@ export default function BizAgent({ activeView, selectedAgentName, onClearAgent, 
               <span className="w-2 h-2 rounded-full bg-success" />
             </div>
           </div>
-          <span className={`text-[11px] px-2.5 py-1 rounded-full font-medium shrink-0 ${catConfig.color}`}>
-            {catConfig.label}
-          </span>
+          <div className="flex items-center gap-2">
+            <span className={`text-[11px] px-2.5 py-1 rounded-full font-medium shrink-0 ${catConfig.color}`}>
+              {catConfig.label}
+            </span>
+            {onClearSkill && (
+              <button onClick={onClearSkill} className="p-0.5 hover:bg-bg rounded transition-colors text-text-muted">
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
         </div>
 
         {/* Tab Bar */}

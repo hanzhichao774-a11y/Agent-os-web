@@ -112,7 +112,7 @@ function DataOutputPanel({ outputs }: { outputs: OutputItem[] }) {
                   <h5 className="text-sm font-semibold text-text mb-1">{item.title}</h5>
                   {item.agentName && <p className="text-xs text-text-muted">由 {item.agentName.replace(/^\S+\s/, '')} 生成</p>}
                 </div>
-                <span className="text-[11px] px-2 py-0.5 rounded-full bg-primary/10 text-primary font-medium shrink-0">
+                <span className={`text-[11px] px-2 py-0.5 rounded-full font-medium shrink-0 ${(OUTPUT_TYPE_COLORS[item.type] || DEFAULT_OUTPUT_COLOR).bg} ${(OUTPUT_TYPE_COLORS[item.type] || DEFAULT_OUTPUT_COLOR).text}`}>
                   {item.type}
                 </span>
               </div>
@@ -124,7 +124,7 @@ function DataOutputPanel({ outputs }: { outputs: OutputItem[] }) {
   );
 }
 
-function FilesPanel({ outputs, projectId, taskId }: { outputs: OutputItem[]; projectId: string; taskId: string | null }) {
+function FilesPanel({ projectId, taskId }: { projectId: string; taskId: string | null }) {
   const [uploadedFiles, setUploadedFiles] = useState<TaskFile[]>([]);
   const [outputFiles, setOutputFiles] = useState<TaskFile[]>([]);
 
@@ -348,7 +348,7 @@ function KnowledgeGraph({ projectId, taskId }: { projectId: string; taskId: stri
         <h3 className="text-sm font-semibold text-text">知识图谱</h3>
         <div className="flex items-center gap-2">
           <span className="text-[10px] text-text-muted">
-            已展示 {visibleEntities.length} / 总计 {totalEntities} 实体
+            已展示 {visibleEntities.length} / 总计 {totalEntities} 实体 · {totalRelations} 关系
           </span>
           <button onClick={loadTop} className="p-0.5 rounded hover:bg-border transition-colors" title="重置图谱">
             <RefreshCw className={`w-3 h-3 text-text-muted ${loading ? 'animate-spin' : ''}`} />
@@ -383,7 +383,7 @@ function KnowledgeGraph({ projectId, taskId }: { projectId: string; taskId: stri
                             color: color,
                             border: `1px solid ${color}30`,
                             cursor: expandableIds.has(ent.id) ? 'pointer' : 'default',
-                            ringColor: isExpanded ? color : undefined,
+                            boxShadow: isExpanded ? `0 0 0 1px ${color}` : undefined,
                           }}
                           title={ent.description || ent.name}
                           onClick={() => {
@@ -486,7 +486,7 @@ export default function RightPanel({ activeView, activeProjectId, activeTaskId, 
             </div>
           </div>
         )}
-        {activeTab === 'files' && <FilesPanel outputs={outputs} projectId={activeProjectId!} taskId={activeTaskId} />}
+        {activeTab === 'files' && <FilesPanel projectId={activeProjectId!} taskId={activeTaskId} />}
         {activeTab === 'graph' && <KnowledgeGraph projectId={activeProjectId!} taskId={activeTaskId} />}
       </div>
     </div>

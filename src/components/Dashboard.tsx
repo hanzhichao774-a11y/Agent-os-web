@@ -177,7 +177,7 @@ export default function Dashboard() {
             </div>
             <div>
               <div className="text-xl font-bold text-text tabular-nums">{globalStats.tasks_completed}</div>
-              <div className="text-[11px] text-text-muted">已完成任务</div>
+              <div className="text-[11px] text-text-muted">已完成任务 · 文档 {stats?.docs_count ?? 0}</div>
             </div>
           </div>
         </div>

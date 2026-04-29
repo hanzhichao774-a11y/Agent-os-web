@@ -1,4 +1,7 @@
 agno[os]>=2.5.0
+fastapi[standard]>=0.115.0
+uvicorn[standard]>=0.30.0
+python-multipart>=0.0.9
 openai>=1.0.0
 anthropic>=0.40.0
 python-dotenv>=1.0.0

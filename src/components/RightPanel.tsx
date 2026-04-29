@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { Circle, FileText, Network, Download, ExternalLink, X, RefreshCw } from 'lucide-react';
-import { fetchTaskFiles, getWorkspaceFileUrl, fetchTopEntities, expandEntity, excludeEntity } from '../services/api';
+import { Circle, FileText, Network, Download, ExternalLink, X, RefreshCw, RotateCcw, ChevronDown } from 'lucide-react';
+import { fetchTaskFiles, getWorkspaceFileUrl, fetchTopEntities, expandEntity, excludeEntity, fetchExcludedEntities } from '../services/api';
 import type { TaskFile, EntityNode, EntityRelation } from '../services/api';
 import type { OutputItem } from '../App';
 import WorkflowPanel from './WorkflowPanel';
@@ -302,6 +302,20 @@ function KnowledgeGraph({ projectId, taskId }: { projectId: string; taskId: stri
     setVisibleRelations(prev => prev.filter(r =>
       r.source_entity_id !== ent.id && r.target_entity_id !== ent.id
     ));
+    setExcludedEntities(prev => [...prev, { ...ent, excluded: true }]);
+  };
+
+  const [excludedEntities, setExcludedEntities] = useState<EntityNode[]>([]);
+  const [showExcluded, setShowExcluded] = useState(false);
+
+  useEffect(() => {
+    fetchExcludedEntities(projectId).then(setExcludedEntities).catch(() => {});
+  }, [projectId]);
+
+  const handleRestore = async (ent: EntityNode) => {
+    await excludeEntity(ent.id, false);
+    setExcludedEntities(prev => prev.filter(e => e.id !== ent.id));
+    loadTop();
   };
 
   const expandableIds = useMemo(() => {
@@ -408,6 +422,40 @@ function KnowledgeGraph({ projectId, taskId }: { projectId: string; taskId: stri
                 </div>
               );
             })
+          )}
+
+          {/* Excluded entities collapsible section */}
+          {excludedEntities.length > 0 && (
+            <div className="mt-3 border-t border-border pt-2">
+              <button
+                onClick={() => setShowExcluded(prev => !prev)}
+                className="flex items-center gap-1 px-0.5 py-0.5 w-full text-left hover:bg-bg/50 rounded transition-colors"
+              >
+                <ChevronDown className={`w-3 h-3 text-text-muted transition-transform ${showExcluded ? '' : '-rotate-90'}`} />
+                <span className="text-[10px] text-text-muted font-medium">已排除</span>
+                <span className="text-[9px] text-text-muted">({excludedEntities.length})</span>
+              </button>
+              {showExcluded && (
+                <div className="flex flex-wrap gap-1 px-0.5 mt-1.5">
+                  {excludedEntities.map(ent => (
+                    <span
+                      key={ent.id}
+                      className="group inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full text-[10px] font-medium cursor-pointer transition-all hover:shadow-sm"
+                      style={{
+                        background: '#71717a18',
+                        color: '#a1a1aa',
+                        border: '1px solid #71717a30',
+                      }}
+                      title="点击恢复此实体"
+                      onClick={() => handleRestore(ent)}
+                    >
+                      <span className="max-w-[100px] truncate line-through">{ent.name}</span>
+                      <RotateCcw className="w-2.5 h-2.5 opacity-0 group-hover:opacity-100 transition-opacity" />
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
           )}
         </div>
 

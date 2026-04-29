@@ -308,7 +308,7 @@ export default function Sidebar({ activeView, activeProjectId, activeTaskId, onN
             <textarea
               value={newTaskDesc}
               onChange={(e) => setNewTaskDesc(e.target.value)}
-              placeholder="描述任务内容，BizAgent 将据此自动创建群聊并分配工作..."
+              placeholder="描述任务内容，管理智能体将据此自动创建群聊并分配工作..."
               rows={4}
               className="w-full text-sm bg-bg border border-border rounded-xl px-4 py-3 mb-6 outline-none focus:border-primary text-text resize-none placeholder:text-text-muted"
             />

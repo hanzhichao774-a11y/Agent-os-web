@@ -76,7 +76,7 @@ function getSkillMeta(skill: SkillInfo) {
     source: '能力教学',
     scope: `${Math.floor(Math.random() * 5 + 1)} 个项目`,
     version: 'v1.0',
-    author: skill.mounted_agents?.[0]?.name || 'BizAgent',
+    author: skill.mounted_agents?.[0]?.name || '管理智能体',
     agentTag: skill.mounted_agents?.[0]?.name || '通用工具',
   };
 }
@@ -436,7 +436,7 @@ export default function BizAgent({ activeView, selectedAgentName, onClearAgent, 
             <Sparkles className="w-5 h-5 text-primary" />
           </div>
           <div>
-            <h3 className="text-sm font-semibold text-text">BizAgent</h3>
+            <h3 className="text-sm font-semibold text-text">管理智能体</h3>
             <div className="flex items-center gap-1.5">
               <span className="w-1.5 h-1.5 rounded-full bg-success" />
               <span className="text-[11px] text-text-muted">自管理运行中</span>

@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import Sidebar from './components/Sidebar';
 import Dashboard from './components/Dashboard';
 import BizAgent from './components/BizAgent';
@@ -96,6 +96,40 @@ function App() {
   const currentProject = projects.find(p => p.id === activeProjectId);
   const showBizAgent = !isProjectView;
 
+  const [rightPanelWidth, setRightPanelWidth] = useState(320);
+  const draggingRef = useRef(false);
+  const startXRef = useRef(0);
+  const startWidthRef = useRef(320);
+
+  const onResizeStart = useCallback((e: React.MouseEvent) => {
+    draggingRef.current = true;
+    startXRef.current = e.clientX;
+    startWidthRef.current = rightPanelWidth;
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+  }, [rightPanelWidth]);
+
+  useEffect(() => {
+    const onMove = (e: MouseEvent) => {
+      if (!draggingRef.current) return;
+      const delta = startXRef.current - e.clientX;
+      const newWidth = Math.min(600, Math.max(240, startWidthRef.current + delta));
+      setRightPanelWidth(newWidth);
+    };
+    const onUp = () => {
+      if (!draggingRef.current) return;
+      draggingRef.current = false;
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    return () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+  }, []);
+
   return (
     <div className="h-screen flex bg-bg">
       <Sidebar
@@ -122,7 +156,11 @@ function App() {
                 projectDescription={currentProject?.description || ''}
               />
             </div>
-            <div className="w-80 shrink-0 overflow-hidden">
+            <div
+              onMouseDown={onResizeStart}
+              className="w-1 shrink-0 cursor-col-resize hover:bg-primary/30 active:bg-primary/50 transition-colors"
+            />
+            <div className="shrink-0 overflow-hidden" style={{ width: rightPanelWidth }}>
               <BizAgent
                 activeView="project"
                 projectId={activeProjectId!}
@@ -132,7 +170,7 @@ function App() {
           </>
         ) : isTaskChat ? (
           <>
-            <div className="flex-[3] min-w-0 overflow-hidden">
+            <div className="flex-1 min-w-0 overflow-hidden">
               <ProjectChat
                 projectId={activeProjectId!}
                 taskId={chatTaskId}
@@ -145,7 +183,11 @@ function App() {
                 onActivePlanChange={setActivePlan}
               />
             </div>
-            <div className="flex-[2] min-w-0 overflow-hidden">
+            <div
+              onMouseDown={onResizeStart}
+              className="w-1 shrink-0 cursor-col-resize hover:bg-primary/30 active:bg-primary/50 transition-colors"
+            />
+            <div className="shrink-0 min-w-0 overflow-hidden" style={{ width: rightPanelWidth }}>
               <RightPanel
                 activeView={activeView}
                 activeProjectId={activeProjectId}
@@ -172,9 +214,15 @@ function App() {
       </div>
 
       {showBizAgent && (
-        <div className="w-80 shrink-0">
-          <BizAgent activeView={activeView} selectedSkillId={selectedSkillId} onClearSkill={() => setSelectedSkillId(null)} />
-        </div>
+        <>
+          <div
+            onMouseDown={onResizeStart}
+            className="w-1 shrink-0 cursor-col-resize hover:bg-primary/30 active:bg-primary/50 transition-colors"
+          />
+          <div className="shrink-0" style={{ width: rightPanelWidth }}>
+            <BizAgent activeView={activeView} selectedSkillId={selectedSkillId} onClearSkill={() => setSelectedSkillId(null)} />
+          </div>
+        </>
       )}
 
       <SettingsModal open={showSettings} onClose={() => setShowSettings(false)} />

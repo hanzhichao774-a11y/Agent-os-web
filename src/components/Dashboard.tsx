@@ -71,7 +71,7 @@ function SlotCard({ slot }: { slot: WorkerSlotStatus }) {
             <Icon className={`w-4.5 h-4.5 ${config.color}`} />
           </div>
           <div>
-            <div className="text-sm font-semibold text-text">SubAgent #{slot.slot_id}</div>
+            <div className="text-sm font-semibold text-text">数字员工#{slot.slot_id}</div>
             <div className={`text-[11px] font-medium ${config.color}`}>{config.label}</div>
           </div>
         </div>

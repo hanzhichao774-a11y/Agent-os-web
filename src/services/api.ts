@@ -116,7 +116,7 @@ export async function streamAgentChat(
 }
 
 export interface TeamChatEvent {
-  type: 'content' | 'plan_created' | 'subtask_started' | 'subtask_completed' | 'subtask_failed' | 'plan_completed' | 'summary' | 'error' | 'done';
+  type: 'content' | 'plan_created' | 'subtask_started' | 'subtask_completed' | 'subtask_failed' | 'plan_completed' | 'summary' | 'error' | 'done' | 'skill_hint';
   content?: string;
   plan_id?: string;
   execution_mode?: string;
@@ -128,6 +128,7 @@ export interface TeamChatEvent {
   token_usage?: { input_tokens: number; output_tokens: number; total_tokens: number };
   status?: string;
   summary?: string;
+  skill_key?: string;
   done?: boolean;
 }
 
@@ -696,6 +697,13 @@ export async function expandEntity(
 export async function excludeEntity(entityId: string, exclude: boolean = true): Promise<{ success: boolean }> {
   const res = await fetch(`${API_BASE}/api/entities/item/${entityId}/exclude?exclude=${exclude}`, { method: 'PUT' });
   return res.json();
+}
+
+export async function fetchExcludedEntities(projectId: string): Promise<EntityNode[]> {
+  const res = await fetch(`${API_BASE}/api/entities/${projectId}`);
+  if (!res.ok) return [];
+  const data = await res.json();
+  return (data.entities || []).filter((e: EntityNode) => e.excluded);
 }
 
 export async function deleteEntity(entityId: string): Promise<{ success: boolean }> {

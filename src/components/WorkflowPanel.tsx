@@ -97,7 +97,7 @@ export default function WorkflowPanel({ activePlan }: WorkflowPanelProps) {
             : 'border-border bg-surface text-text-secondary'
         }`}>
           <BrainCircuit className={`w-3.5 h-3.5 ${bizStatus === 'working' ? 'text-blue-500' : 'text-text-muted'}`} />
-          <span>BizAgent</span>
+          <span>管理智能体</span>
           <span className={`w-2 h-2 rounded-full shrink-0 ${
             bizStatus === 'working' ? 'bg-blue-500 animate-pulse' : 'bg-gray-300 dark:bg-gray-600'
           }`} />
@@ -151,7 +151,7 @@ export default function WorkflowPanel({ activePlan }: WorkflowPanelProps) {
                   ) : (
                     <Icon className={`w-3 h-3 ${cfg.color}`} />
                   )}
-                  <span className="text-[11px] font-semibold text-text">#{slot.slot_id}</span>
+                  <span className="text-[11px] font-semibold text-text">数字员工#{slot.slot_id}</span>
                 </div>
                 <span className={`w-1.5 h-1.5 rounded-full ${
                   slot.status === 'idle' ? 'bg-gray-300 dark:bg-gray-600' :

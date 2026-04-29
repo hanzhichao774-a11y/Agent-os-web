@@ -154,7 +154,7 @@ function SubTaskCard({ slotId, description, status }: { slotId: number; descript
     <div className={`flex items-center gap-3 ${cfg.bg} rounded-lg px-3 py-2 text-xs`}>
       <div className="flex items-center gap-1.5">
         <Cpu className={`w-3.5 h-3.5 ${cfg.color}`} />
-        <span className="font-medium text-text">#{slotId}</span>
+        <span className="font-medium text-text">数字员工#{slotId}</span>
       </div>
       <span className="flex-1 text-text-secondary truncate">{description}</span>
       <span className={`font-medium ${cfg.color} shrink-0`}>
@@ -243,7 +243,7 @@ export default function ProjectChat({ projectId, taskId, projectName, projectDes
             {
               id: `sys_${newSessionId}`,
               role: 'system',
-              content: `BizAgent 已就绪，项目：${projectName}`,
+              content: `管理智能体已就绪，项目：${projectName}`,
               timestamp: now(),
             },
           ]);
@@ -256,12 +256,13 @@ export default function ProjectChat({ projectId, taskId, projectName, projectDes
     return new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
   }
 
-  const handleSend = async () => {
-    if (!input.trim() || isLoading) return;
+  const handleSend = async (overrideMessage?: string) => {
+    const msg = overrideMessage || input.trim();
+    if (!msg || isLoading) return;
 
-    const userMsg: ChatMsg = { id: Date.now().toString(), role: 'human', content: input, timestamp: now() };
+    const userMsg: ChatMsg = { id: Date.now().toString(), role: 'human', content: msg, timestamp: now() };
     setMessages(prev => [...prev, userMsg]);
-    setInput('');
+    if (!overrideMessage) setInput('');
     setIsLoading(true);
     setActivePlan(null);
 
@@ -300,8 +301,8 @@ export default function ProjectChat({ projectId, taskId, projectName, projectDes
           }]);
 
           onUpdateTeamSteps(() => subtasks.map(st => ({
-            name: `SubAgent #${st.slot_id}`,
-            agent: `SubAgent #${st.slot_id}`,
+            name: `数字员工#${st.slot_id}`,
+            agent: `数字员工#${st.slot_id}`,
             status: 'pending' as const,
             time: now(),
           })));
@@ -317,10 +318,10 @@ export default function ProjectChat({ projectId, taskId, projectName, projectDes
           });
 
           onUpdateTeamSteps(prev => prev.map(s =>
-            s.agent === `SubAgent #${event.slot_id}` ? { ...s, status: 'in-progress' as const, startedAt: Date.now() } : s
+            s.agent === `数字员工#${event.slot_id}` ? { ...s, status: 'in-progress' as const, startedAt: Date.now() } : s
           ));
           onUpdateTeamAgents(prev => {
-            const name = `SubAgent #${event.slot_id}`;
+            const name = `数字员工#${event.slot_id}`;
             if (!prev.some(a => a.name === name)) {
               return [...prev, { name, status: 'working', currentTask: event.description || '' }];
             }
@@ -338,12 +339,12 @@ export default function ProjectChat({ projectId, taskId, projectName, projectDes
           });
 
           onUpdateTeamSteps(prev => prev.map(s =>
-            s.agent === `SubAgent #${event.slot_id}`
+            s.agent === `数字员工#${event.slot_id}`
               ? { ...s, status: 'completed' as const, duration: s.startedAt ? `${((Date.now() - s.startedAt) / 1000).toFixed(1)}s` : undefined, tokens: event.token_usage?.total_tokens }
               : s
           ));
           onUpdateTeamAgents(prev => prev.map(a =>
-            a.name === `SubAgent #${event.slot_id}` ? { ...a, status: 'done', currentTask: '已完成' } : a
+            a.name === `数字员工#${event.slot_id}` ? { ...a, status: 'done', currentTask: '已完成' } : a
           ));
 
         } else if (event.type === 'subtask_failed') {
@@ -363,7 +364,7 @@ export default function ProjectChat({ projectId, taskId, projectName, projectDes
               return [...prev, {
                 id: summaryMsgId,
                 role: 'leader' as const,
-                agentName: 'BizAgent',
+                agentName: '管理智能体',
                 content: event.content || '',
                 timestamp: now(),
               }];
@@ -375,12 +376,26 @@ export default function ProjectChat({ projectId, taskId, projectName, projectDes
 
         } else if (event.type === 'plan_completed') {
           setActivePlan(null);
+          setMessages(prev => prev.filter(m => m.role !== 'plan'));
 
         } else if (event.type === 'error') {
           setMessages(prev => [...prev, {
             id: `err_${Date.now()}`,
             role: 'system' as const,
             content: event.content || '编排出错',
+            timestamp: now(),
+          }]);
+
+        } else if (event.type === 'skill_hint') {
+          const skillDisplayNames: Record<string, string> = {
+            entity_extract: '实体抽取',
+            entity_exclude: '实体排除',
+          };
+          const displayName = skillDisplayNames[event.skill_key || ''] || event.skill_key || '技能';
+          setMessages(prev => [...prev, {
+            id: `skill_hint_${Date.now()}`,
+            role: 'system' as const,
+            content: `__SKILL_HINT__${displayName}`,
             timestamp: now(),
           }]);
 
@@ -398,6 +413,7 @@ export default function ProjectChat({ projectId, taskId, projectName, projectDes
     } finally {
       setIsLoading(false);
       setActivePlan(null);
+      setMessages(prev => prev.filter(m => m.role !== 'plan'));
     }
   };
 
@@ -429,7 +445,7 @@ export default function ProjectChat({ projectId, taskId, projectName, projectDes
         <h2 className="font-semibold text-text text-base">{chatTitle}</h2>
         <div className="flex items-center gap-2 text-sm text-text-muted">
           <Cpu className="w-4 h-4" />
-          <span>BizAgent + 3 SubAgents</span>
+          <span>管理智能体 + 3 数字员工</span>
         </div>
       </div>
 
@@ -464,6 +480,25 @@ export default function ProjectChat({ projectId, taskId, projectName, projectDes
           }
 
           if (msg.role === 'system') {
+            if (msg.content.startsWith('__SKILL_HINT__')) {
+              const skillName = msg.content.replace('__SKILL_HINT__', '');
+              return (
+                <div key={msg.id} className="flex justify-start">
+                  <div className="bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/30 rounded-lg px-4 py-3 max-w-lg">
+                    <div className="text-xs text-amber-700 dark:text-amber-400 mb-2">
+                      管理智能体发现「{skillName}」能力可沉淀为技能，后续将自动通过 Skill 执行，提升效率。
+                    </div>
+                    <button
+                      onClick={() => handleSend(`帮我把${skillName}封装成技能`)}
+                      className="text-xs bg-amber-500 hover:bg-amber-600 text-white px-3 py-1.5 rounded-lg transition-colors"
+                    >
+                      封装为技能
+                    </button>
+                  </div>
+                </div>
+              );
+            }
+
             return (
               <div key={msg.id} className="flex gap-3">
                 <div className="w-8 h-8 rounded-full bg-gray-200 dark:bg-gray-700 flex items-center justify-center shrink-0 text-xs font-bold text-gray-500 dark:text-gray-400">
@@ -505,7 +540,7 @@ export default function ProjectChat({ projectId, taskId, projectName, projectDes
                   <span className="text-xs font-bold text-white">B</span>
                 </div>
                 <div className="max-w-[75%] min-w-0">
-                  <div className="text-xs text-text-muted mb-1">BizAgent</div>
+                  <div className="text-xs text-text-muted mb-1">管理智能体</div>
                   <div className="bg-surface border border-border rounded-xl rounded-tl-sm px-4 py-2.5 text-sm">
                     <div className="text-text prose prose-sm max-w-none dark:prose-invert">
                       {msg.content === '' ? (
@@ -575,7 +610,7 @@ export default function ProjectChat({ projectId, taskId, projectName, projectDes
           <div className="flex justify-center">
             <div className="flex items-center gap-2 text-xs text-text-muted bg-bg px-3 py-1.5 rounded-full">
               <Loader2 className="w-3 h-3 animate-spin" />
-              BizAgent 正在分析任务...
+              管理智能体正在分析任务...
             </div>
           </div>
         )}
@@ -598,12 +633,12 @@ export default function ProjectChat({ projectId, taskId, projectName, projectDes
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
-            placeholder="输入消息，BizAgent 将自动编排 SubAgent 执行..."
+            placeholder="输入消息，管理智能体将自动编排数字员工执行..."
             disabled={isLoading}
             className="flex-1 bg-transparent outline-none text-sm text-text disabled:opacity-50"
           />
           <button
-            onClick={handleSend}
+            onClick={() => handleSend()}
             disabled={isLoading || !input.trim()}
             className="p-2 bg-primary hover:bg-primary-dark text-white rounded-lg transition-colors shrink-0 disabled:opacity-50"
           >
@@ -619,7 +654,7 @@ export default function ProjectChat({ projectId, taskId, projectName, projectDes
             <span>project</span>
           </button>
           <div className="flex-1" />
-          <span className="text-xs text-text-muted">BizAgent Orchestrator</span>
+          <span className="text-xs text-text-muted">管理智能体</span>
         </div>
       </div>
     </div>

@@ -17,14 +17,14 @@ const categoryConfig: Record<string, { label: string; color: string }> = {
 };
 
 const MOCK_PROVIDERS: Record<string, string> = {
-  'SQL执行器': 'BizAgent',
+  'SQL执行器': '管理智能体',
   'Python沙箱': 'samhar',
-  '企业搜索': 'BizAgent',
-  '图表生成': 'BizAgent',
+  '企业搜索': '管理智能体',
+  '图表生成': '管理智能体',
   '飞书通知': 'samhar',
   'Jira操作': 'samhar',
-  '邮件发送': 'BizAgent',
-  'PDF解析': 'BizAgent',
+  '邮件发送': '管理智能体',
+  'PDF解析': '管理智能体',
 };
 
 const MOCK_USAGE: Record<string, number> = {
@@ -75,7 +75,7 @@ export default function SkillPage({ selectedSkillId, onSelectSkill }: SkillPageP
           <div className="grid grid-cols-3 gap-5">
             {skillList.map((skill) => {
               const cat = categoryConfig[skill.category] || categoryConfig.api;
-              const provider = MOCK_PROVIDERS[skill.name] || 'BizAgent';
+              const provider = MOCK_PROVIDERS[skill.name] || '管理智能体';
               const usage = MOCK_USAGE[skill.name] ?? Math.floor(Math.random() * 3000 + 100);
               const isSelected = selectedSkillId === skill.id;
 

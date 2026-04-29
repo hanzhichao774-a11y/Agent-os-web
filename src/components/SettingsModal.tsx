@@ -103,7 +103,7 @@ function TextInput({ value, onChange, placeholder, mono }: {
 
 // ─── LLM Tab ────────────────────────────────────────────────────────────────
 
-function LLMTab({ onTestResult }: { onTestResult: (r: { ok: boolean; message: string } | null) => void }) {
+function LLMTab({ onTestResult, onSaveSuccess }: { onTestResult: (r: { ok: boolean; message: string } | null) => void; onSaveSuccess: () => void }) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
@@ -145,7 +145,8 @@ function LLMTab({ onTestResult }: { onTestResult: (r: { ok: boolean; message: st
     setSaving(true);
     try {
       await saveLLMSettings({ provider, model_id: modelId, api_key: apiKey, base_url: baseUrl });
-    } catch { /* */ }
+      onSaveSuccess();
+    } catch { setTestResult({ ok: false, message: '保存失败' }); }
     finally { setSaving(false); }
   };
 
@@ -218,7 +219,7 @@ function LLMTab({ onTestResult }: { onTestResult: (r: { ok: boolean; message: st
 
 // ─── Embedding Tab ──────────────────────────────────────────────────────────
 
-function EmbeddingTab({ onTestResult }: { onTestResult: (r: { ok: boolean; message: string } | null) => void }) {
+function EmbeddingTab({ onTestResult, onSaveSuccess }: { onTestResult: (r: { ok: boolean; message: string } | null) => void; onSaveSuccess: () => void }) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
@@ -251,10 +252,8 @@ function EmbeddingTab({ onTestResult }: { onTestResult: (r: { ok: boolean; messa
     setSaving(true);
     try {
       const res = await saveEmbeddingSettings({ mode, model_id: modelId, api_key: apiKey, base_url: baseUrl, dimensions });
-      if (res.warning) {
-        setTestResult({ ok: true, message: res.warning });
-      }
-    } catch { /* */ }
+      onSaveSuccess();
+    } catch { setTestResult({ ok: false, message: '保存失败' }); }
     finally { setSaving(false); }
   };
 
@@ -348,7 +347,7 @@ function EmbeddingTab({ onTestResult }: { onTestResult: (r: { ok: boolean; messa
 
 // ─── Reranker Tab ───────────────────────────────────────────────────────────
 
-function RerankerTab({ onTestResult }: { onTestResult: (r: { ok: boolean; message: string } | null) => void }) {
+function RerankerTab({ onTestResult, onSaveSuccess }: { onTestResult: (r: { ok: boolean; message: string } | null) => void; onSaveSuccess: () => void }) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
@@ -381,7 +380,8 @@ function RerankerTab({ onTestResult }: { onTestResult: (r: { ok: boolean; messag
     setSaving(true);
     try {
       await saveRerankerSettings({ enabled, model_id: modelId, api_key: apiKey, base_url: baseUrl, top_n: topN });
-    } catch { /* */ }
+      onSaveSuccess();
+    } catch { setTestResult({ ok: false, message: '保存失败' }); }
     finally { setSaving(false); }
   };
 
@@ -558,9 +558,15 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
 
         {/* Tab Content */}
         <div className="overflow-y-auto flex-1 px-6 py-5">
-          {activeTab === 'llm' && <LLMTab onTestResult={setTestResult} />}
-          {activeTab === 'embedding' && <EmbeddingTab onTestResult={setTestResult} />}
-          {activeTab === 'reranker' && <RerankerTab onTestResult={setTestResult} />}
+          <div className={activeTab === 'llm' ? '' : 'hidden'}>
+            <LLMTab onTestResult={setTestResult} onSaveSuccess={onClose} />
+          </div>
+          <div className={activeTab === 'embedding' ? '' : 'hidden'}>
+            <EmbeddingTab onTestResult={setTestResult} onSaveSuccess={onClose} />
+          </div>
+          <div className={activeTab === 'reranker' ? '' : 'hidden'}>
+            <RerankerTab onTestResult={setTestResult} onSaveSuccess={onClose} />
+          </div>
         </div>
       </div>
     </div>

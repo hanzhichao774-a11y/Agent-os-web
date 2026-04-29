@@ -139,6 +139,8 @@ def test_reranker(model_id: str, api_key: str, base_url: str) -> bool:
         headers["Authorization"] = f"Bearer {api_key}"
 
     base = base_url.rstrip("/")
+    if base.endswith("/v1"):
+        base = base[:-3]
     query = "什么是人工智能"
     documents = ["人工智能是计算机科学的分支", "今天天气很好适合出去玩", "深度学习需要大量训练数据"]
 

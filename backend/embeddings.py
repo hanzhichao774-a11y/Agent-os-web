@@ -84,6 +84,8 @@ class OpenAICompatibleReranker(BaseReranker):
             headers["Authorization"] = f"Bearer {self.api_key}"
 
         base = self.base_url.rstrip("/")
+        if base.endswith("/v1"):
+            base = base[:-3]
 
         jina_url = f"{base}/v1/rerank"
         jina_body = {
@@ -102,6 +104,8 @@ class OpenAICompatibleReranker(BaseReranker):
             if e.response.status_code != 404:
                 raise
         except httpx.ConnectError:
+            pass
+        except ValueError:
             pass
 
         tei_url = f"{base}/rerank"

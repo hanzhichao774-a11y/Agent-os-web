@@ -251,7 +251,7 @@ function EmbeddingTab({ onTestResult, onSaveSuccess }: { onTestResult: (r: { ok:
   const handleSave = async () => {
     setSaving(true);
     try {
-      const res = await saveEmbeddingSettings({ mode, model_id: modelId, api_key: apiKey, base_url: baseUrl, dimensions });
+      await saveEmbeddingSettings({ mode, model_id: modelId, api_key: apiKey, base_url: baseUrl, dimensions });
       onSaveSuccess();
     } catch { setTestResult({ ok: false, message: '保存失败' }); }
     finally { setSaving(false); }

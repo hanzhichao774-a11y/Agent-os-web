@@ -4,6 +4,40 @@
 
 ---
 
+## [2026-04-30] 修复部署环境线程耗尽导致启动崩溃
+
+### 问题现象
+
+现场 Docker 部署时，后端容器反复重启，错误日志为：
+```
+RuntimeError: can't start new thread
+```
+崩溃点在 `matplotlib.font_manager.FontManager.__init__()` 尝试创建线程时。
+
+### 根因分析
+
+1. **FastEmbed + onnxruntime 占满容器线程配额**：`fastembed` 依赖 `onnxruntime`，模型加载阶段会启动大量 ONNX 推理线程，在容器 PID/线程限制较低的环境下，会占满线程配额。
+2. **matplotlib 在 import 时创建线程**：`chart_generator.py` 在模块顶层 `import matplotlib.pyplot`，触发 `FontManager` 初始化启动 `threading.Timer`，此时线程已耗尽，直接崩溃。
+3. **两者叠加**：FastEmbed 先加载成功，随后 matplotlib 导入时无线程可用。
+
+### 修复措施
+
+| 文件 | 改动 |
+|------|------|
+| `backend/knowledge.py` | 移除 `FastEmbedEmbedder` 本地模型。未配置远程 Embedding API 时跳过知识库初始化（不崩溃） |
+| `backend/requirements.txt` | 移除 `fastembed>=0.8.0` 依赖（同时去除 onnxruntime ~300MB 包体） |
+| `backend/main.py` | 在所有 import 之前设置 `OMP_NUM_THREADS=2`、`ORT_NUM_THREADS=2`、`MPLBACKEND=Agg` 限制线程数 |
+| `backend/builtin_tools/chart_generator.py` | matplotlib 改为懒加载（`_ensure_matplotlib()`），不在 import 时触发 FontManager 线程 |
+| `Dockerfile.backend` | 新增 `MPLBACKEND=Agg` 环境变量 |
+
+### 影响
+
+- Docker 镜像减小 ~300MB（去除 onnxruntime + fastembed）
+- 运行时内存减少 ~500MB（不再加载本地 ONNX 模型）
+- **现场部署必须配置远程 Embedding API**（在「模型配置」或 `.env` 中设置 `EMBEDDING_MODEL_ID` 等参数），否则知识库功能不可用但服务正常运行
+
+---
+
 ## [2026-04-28] 知识图谱实体抽取与下钻式可视化
 
 ### 功能概述

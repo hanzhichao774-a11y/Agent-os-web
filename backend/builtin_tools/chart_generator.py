@@ -5,18 +5,29 @@ import time
 import re
 from pathlib import Path
 
-import matplotlib
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
-import matplotlib.font_manager as fm
-
 from config import WORKSPACE_DIR
 
+_plt = None
+_fm = None
 _CN_FONT = None
+
+
+def _ensure_matplotlib():
+    """Lazy-load matplotlib to avoid startup thread exhaustion."""
+    global _plt, _fm
+    if _plt is not None:
+        return
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    import matplotlib.font_manager as fm
+    _plt = plt
+    _fm = fm
 
 def _get_cn_font():
     """Find a CJK font available on the system for matplotlib."""
     global _CN_FONT
+    _ensure_matplotlib()
     if _CN_FONT is not None:
         return _CN_FONT
 
@@ -25,12 +36,12 @@ def _get_cn_font():
         "Noto Sans CJK SC", "Noto Sans SC", "PingFang SC",
         "Microsoft YaHei", "STHeiti", "Arial Unicode MS",
     ]
-    available = {f.name for f in fm.fontManager.ttflist}
+    available = {f.name for f in _fm.fontManager.ttflist}
     for name in candidates:
         if name in available:
             _CN_FONT = name
-            plt.rcParams["font.sans-serif"] = [name, "DejaVu Sans"]
-            plt.rcParams["axes.unicode_minus"] = False
+            _plt.rcParams["font.sans-serif"] = [name, "DejaVu Sans"]
+            _plt.rcParams["axes.unicode_minus"] = False
             return _CN_FONT
 
     _CN_FONT = ""
@@ -77,7 +88,7 @@ def generate_chart(
     if not multi and not values:
         return "错误：data_json 中缺少 values 或 series 字段"
 
-    fig, ax = plt.subplots(figsize=(10, 6))
+    fig, ax = _plt.subplots(figsize=(10, 6))
     fig.patch.set_facecolor("#FAFAFA")
     ax.set_facecolor("#FAFAFA")
 
@@ -154,7 +165,7 @@ def generate_chart(
         ax.spines["right"].set_visible(False)
         ax.grid(axis="y", alpha=0.3)
 
-    plt.tight_layout()
+    _plt.tight_layout()
 
     if not output_filename:
         ts = int(time.time())
@@ -165,7 +176,7 @@ def generate_chart(
 
     output_path = WORKSPACE_DIR / output_filename
     fig.savefig(str(output_path), dpi=150, bbox_inches="tight")
-    plt.close(fig)
+    _plt.close(fig)
 
     try:
         from context import current_project_id, current_task_id

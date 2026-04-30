@@ -1,3 +1,9 @@
+import os
+os.environ.setdefault("OMP_NUM_THREADS", "2")
+os.environ.setdefault("ONNX_NUM_THREADS", "2")
+os.environ.setdefault("ORT_NUM_THREADS", "2")
+os.environ.setdefault("MPLBACKEND", "Agg")
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 

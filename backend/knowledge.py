@@ -2,7 +2,6 @@ import os
 
 try:
     from agno.knowledge.knowledge import Knowledge
-    from agno.knowledge.embedder.fastembed import FastEmbedEmbedder
     from agno.knowledge.chunking.recursive import RecursiveChunking
     from agno.vectordb.pgvector import PgVector, SearchType
     _VECTORDB_AVAILABLE = True
@@ -51,8 +50,11 @@ def _rebuild_knowledge():
         embedder = OpenAIEmbedder(**emb_kwargs)
         print(f"[KNOWLEDGE] 使用远程 Embedding: {emb_cfg['model_id']} @ {emb_cfg['base_url'] or 'default'}")
     else:
-        embedder = FastEmbedEmbedder(id="BAAI/bge-small-zh-v1.5", dimensions=512)
-        print("[KNOWLEDGE] 使用本地 FastEmbed: BAAI/bge-small-zh-v1.5")
+        print("[KNOWLEDGE] 未配置远程 Embedding API，知识库功能不可用")
+        print("[KNOWLEDGE] 请在「模型配置」中设置 Embedding，或在 .env 中配置 EMBEDDING_MODEL_ID")
+        _knowledge = None
+        _vector_db = None
+        return
 
     reranker = None
     if rer_cfg["enabled"] and rer_cfg["model_id"]:

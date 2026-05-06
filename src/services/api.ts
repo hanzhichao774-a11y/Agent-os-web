@@ -116,7 +116,7 @@ export async function streamAgentChat(
 }
 
 export interface TeamChatEvent {
-  type: 'content' | 'plan_created' | 'subtask_started' | 'subtask_completed' | 'subtask_failed' | 'plan_completed' | 'summary' | 'error' | 'done' | 'skill_hint';
+  type: 'content' | 'plan_created' | 'subtask_started' | 'subtask_completed' | 'subtask_failed' | 'plan_completed' | 'summary' | 'error' | 'done' | 'skill_hint' | 'progress' | 'heartbeat';
   content?: string;
   plan_id?: string;
   execution_mode?: string;
@@ -130,6 +130,10 @@ export interface TeamChatEvent {
   summary?: string;
   skill_key?: string;
   done?: boolean;
+  /** progress 事件专属字段 */
+  current?: number;
+  total?: number;
+  label?: string;
 }
 
 /**

@@ -142,7 +142,23 @@ function OutputCards({ items }: { items: OutputItem[] }) {
   );
 }
 
-function SubTaskCard({ slotId, description, status }: { slotId: number; description: string; status: 'pending' | 'working' | 'completed' | 'failed' }) {
+interface SubTaskProgress {
+  current: number;
+  total: number;
+  label: string;
+}
+
+function SubTaskCard({
+  slotId,
+  description,
+  status,
+  progress,
+}: {
+  slotId: number;
+  description: string;
+  status: 'pending' | 'working' | 'completed' | 'failed';
+  progress?: SubTaskProgress;
+}) {
   const statusConfig = {
     pending: { color: 'text-gray-400', bg: 'bg-gray-100 dark:bg-gray-800', label: '等待中' },
     working: { color: 'text-blue-500', bg: 'bg-blue-50 dark:bg-blue-500/10', label: '执行中' },
@@ -150,17 +166,37 @@ function SubTaskCard({ slotId, description, status }: { slotId: number; descript
     failed: { color: 'text-red-500', bg: 'bg-red-50 dark:bg-red-500/10', label: '失败' },
   };
   const cfg = statusConfig[status];
+  const pct = progress && progress.total > 0
+    ? Math.min(100, Math.round((progress.current / progress.total) * 100))
+    : null;
+
   return (
-    <div className={`flex items-center gap-3 ${cfg.bg} rounded-lg px-3 py-2 text-xs`}>
-      <div className="flex items-center gap-1.5">
-        <Cpu className={`w-3.5 h-3.5 ${cfg.color}`} />
-        <span className="font-medium text-text">数字员工#{slotId}</span>
+    <div className={`flex flex-col gap-1.5 ${cfg.bg} rounded-lg px-3 py-2 text-xs`}>
+      <div className="flex items-center gap-3">
+        <div className="flex items-center gap-1.5">
+          <Cpu className={`w-3.5 h-3.5 ${cfg.color}`} />
+          <span className="font-medium text-text">数字员工#{slotId}</span>
+        </div>
+        <span className="flex-1 text-text-secondary truncate">{description}</span>
+        <span className={`font-medium ${cfg.color} shrink-0`}>
+          {status === 'working' && <Loader2 className="w-3 h-3 animate-spin inline mr-1" />}
+          {cfg.label}
+          {pct !== null && status === 'working' && ` ${pct}%`}
+        </span>
       </div>
-      <span className="flex-1 text-text-secondary truncate">{description}</span>
-      <span className={`font-medium ${cfg.color} shrink-0`}>
-        {status === 'working' && <Loader2 className="w-3 h-3 animate-spin inline mr-1" />}
-        {cfg.label}
-      </span>
+      {status === 'working' && progress && progress.total > 0 && (
+        <div className="flex flex-col gap-0.5">
+          <div className="w-full h-1 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+            <div
+              className="h-full bg-blue-500 rounded-full transition-all duration-300"
+              style={{ width: `${pct}%` }}
+            />
+          </div>
+          <span className="text-text-secondary text-[10px] truncate">
+            {progress.label}（{progress.current}/{progress.total}）
+          </span>
+        </div>
+      )}
     </div>
   );
 }
@@ -172,6 +208,7 @@ export default function ProjectChat({ projectId, taskId, projectName, projectDes
   const [isUploading, setIsUploading] = useState(false);
   const [taskName, setTaskName] = useState<string | null>(null);
   const [activePlan, setActivePlan] = useState<{ subtasks: Array<{ slot_id: number; description: string; status: string }> } | null>(null);
+  const [progressMap, setProgressMap] = useState<Record<number, SubTaskProgress>>({});
   const sessionId = useRef(`team_${projectId}_task_${taskId || 'main'}`);
   const msgCache = useRef(new Map<string, ChatMsg[]>());
   const messagesRef = useRef(messages);
@@ -289,9 +326,23 @@ export default function ProjectChat({ projectId, taskId, projectName, projectDes
             );
           });
 
+        } else if (event.type === 'heartbeat') {
+          // 心跳事件：保持连接活跃，无需渲染
+        } else if (event.type === 'progress') {
+          if (event.slot_id !== undefined) {
+            setProgressMap(prev => ({
+              ...prev,
+              [event.slot_id!]: {
+                current: event.current ?? 0,
+                total: event.total ?? 0,
+                label: event.label ?? '',
+              },
+            }));
+          }
         } else if (event.type === 'plan_created') {
           const subtasks = (event.subtasks || []).map(st => ({ ...st, status: 'pending' }));
           setActivePlan({ subtasks });
+          setProgressMap({});
 
           setMessages(prev => [...prev, {
             id: `plan_${Date.now()}`,
@@ -329,6 +380,13 @@ export default function ProjectChat({ projectId, taskId, projectName, projectDes
           });
 
         } else if (event.type === 'subtask_completed') {
+          if (event.slot_id !== undefined) {
+            setProgressMap(prev => {
+              const next = { ...prev };
+              delete next[event.slot_id!];
+              return next;
+            });
+          }
           setActivePlan(prev => {
             if (!prev) return prev;
             return {
@@ -601,6 +659,7 @@ export default function ProjectChat({ projectId, taskId, projectName, projectDes
                 slotId={st.slot_id}
                 description={st.description}
                 status={st.status as 'pending' | 'working' | 'completed' | 'failed'}
+                progress={progressMap[st.slot_id]}
               />
             ))}
           </div>

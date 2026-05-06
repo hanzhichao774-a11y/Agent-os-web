@@ -8,6 +8,7 @@ import time
 
 from database import _get_projects_conn
 from llm import create_model
+from llm_invoker import safe_llm_call_sync, LLMCallError
 
 _MAX_TEXT_LEN = 8000
 
@@ -51,13 +52,20 @@ def extract_entities_sync(
     task_id: str | None = None,
     source_name: str = "",
 ) -> dict:
-    """同步版本：从文本中抽取实体和关系，写入数据库，返回抽取结果摘要。"""
+    """同步版本：从文本中抽取实体和关系，写入数据库，返回抽取结果摘要。
+
+    F001 原则 4：抽取前自动加载项目学习规则，注入 LLM prompt。
+    """
     from agno.agent import Agent
+    from rule_manager import build_extraction_exclusion_text
 
     truncated = text[:_MAX_TEXT_LEN] if len(text) > _MAX_TEXT_LEN else text
 
     excluded_names = _get_excluded_names(project_id)
-    excluded_str = ", ".join(excluded_names) if excluded_names else "（无）"
+    base_excluded = ", ".join(excluded_names) if excluded_names else ""
+
+    # 融合 DB 已排除名单 + 项目学习规则 → 注入 excluded 占位符
+    excluded_str = build_extraction_exclusion_text(project_id, base_excluded)
 
     system_prompt = _EXTRACT_SYSTEM_PROMPT.format(excluded=excluded_str)
 
@@ -68,10 +76,26 @@ def extract_entities_sync(
         markdown=False,
     )
 
-    response = extractor.run(truncated, stream=False)
-    raw = response.content or ""
+    try:
+        llm_result = safe_llm_call_sync(
+            extractor,
+            truncated,
+            max_retries=3,
+            initial_backoff=1.0,
+            stream=False,
+        )
+    except LLMCallError as e:
+        print(f"[ENTITY] LLM 调用失败 (attempts={e.attempts}): {e.reason}")
+        return {
+            "status": "failed",
+            "entities_count": 0,
+            "relations_count": 0,
+            "source": source_name,
+            "error": e.reason,
+            "attempts": e.attempts,
+        }
 
-    raw = raw.strip()
+    raw = (llm_result.content or "").strip()
     if raw.startswith("```"):
         raw = raw.split("\n", 1)[-1]
     if raw.endswith("```"):
@@ -82,7 +106,13 @@ def extract_entities_sync(
         data = json.loads(raw)
     except json.JSONDecodeError as e:
         print(f"[ENTITY] JSON 解析失败: {e}, raw={raw[:200]}")
-        return {"entities_count": 0, "relations_count": 0, "error": str(e)}
+        return {
+            "status": "parse_error",
+            "entities_count": 0,
+            "relations_count": 0,
+            "source": source_name,
+            "error": str(e),
+        }
 
     entities_raw = data.get("entities", [])
     relations_raw = data.get("relations", [])
@@ -91,9 +121,12 @@ def extract_entities_sync(
     relations_count = _insert_relations(project_id, task_id, source_name, relations_raw, entity_ids)
 
     return {
+        "status": "ok",
         "entities_count": len(entity_ids),
         "relations_count": relations_count,
         "source": source_name,
+        "attempts": llm_result.attempts,
+        "used_fallback": llm_result.used_fallback,
     }
 
 

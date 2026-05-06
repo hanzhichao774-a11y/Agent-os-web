@@ -93,6 +93,19 @@ def _init_projects_db():
         )
     """)
     conn.execute("CREATE INDEX IF NOT EXISTS idx_entity_relations_project ON entity_relations(project_id, task_id)")
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS extraction_rules (
+            id TEXT PRIMARY KEY,
+            project_id TEXT NOT NULL,
+            rule_type TEXT NOT NULL,
+            description TEXT NOT NULL,
+            rule_data TEXT NOT NULL DEFAULT '{}',
+            source_message TEXT DEFAULT '',
+            created_at REAL DEFAULT (unixepoch()),
+            apply_count INTEGER DEFAULT 0
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_extraction_rules_project ON extraction_rules(project_id, created_at)")
     conn.commit()
     count = conn.execute("SELECT COUNT(*) FROM projects").fetchone()[0]
     if count == 0:

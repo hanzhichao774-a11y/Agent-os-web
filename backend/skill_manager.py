@@ -41,6 +41,10 @@ def validate_skill(skill: dict) -> tuple[bool, str]:
         return False, "run() 至少需要 1 个参数"
 
     for p in params:
+        # keyword-only 参数（如 progress_cb 这类基础设施回调）允许任意类型/无注解，
+        # 不参与前端 UI 展示，仅供内部桥接（SSE 进度等）使用。
+        if p.kind == inspect.Parameter.KEYWORD_ONLY:
+            continue
         if p.annotation != inspect.Parameter.empty and p.annotation not in VALID_PARAM_TYPES:
             return False, f"参数 {p.name} 类型 {p.annotation} 不在允许范围 {VALID_PARAM_TYPES}"
 
@@ -84,6 +88,9 @@ def _load_skill_module(path: Path) -> dict | None:
         sig = inspect.signature(run_fn)
         params = []
         for name, p in sig.parameters.items():
+            # keyword-only 参数（基础设施回调，如 progress_cb）不暴露给前端 UI
+            if p.kind == inspect.Parameter.KEYWORD_ONLY:
+                continue
             ptype = "string"
             if p.annotation in (float, int):
                 ptype = "number"

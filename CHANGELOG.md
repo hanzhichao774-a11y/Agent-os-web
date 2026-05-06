@@ -4,6 +4,139 @@
 
 ---
 
+## [2026-05-06] F001 大模型驱动架构 — 全 12 Issue 修复（Wave 1-6 + 补丁）
+
+### 背景
+
+本轮修复针对 AgentOS 核心架构漂移问题（[F001](docs/features/F001_AgentOS大模型驱动的任务执行架构.md)）：任务执行原本应由大模型驱动，但代码中大量存在硬编码关键词列表、静态模板、正则意图解析等反模式。共记录并修复 12 个 Issue，全部通过 TDD 实现（111 条 pytest 守护测试）。
+
+---
+
+### Wave 1 — Issue 005 + 006：路由层硬编码移除
+
+**修复文件**：`backend/routes/chat.py`
+
+- **删除** 4 套硬编码意图关键词列表（`_ORCHESTRATE_KEYWORDS`、`_DIRECT_ENTITY_KEYWORDS`、`_ENTITY_EXCLUSION_KEYWORDS`、`_CREATE_SKILL_KEYWORDS`，共 54 个固定词）
+- **删除** `_keyword_fallback` 关键词降级路径
+- **新增** `_classify_with_llm` 函数，引入两级 LLM 兜底链：
+  - 主调用：完整 prompt + 对话上下文，10 秒超时
+  - 兜底 LLM：简化 prompt，去除上下文，5 秒超时
+  - 全部失败：默认 `direct_answer`，让 BizAgent 自主响应
+- 守护测试：`tests/test_intent_routing_no_hardcode.py`（13 条）
+
+---
+
+### Wave 2 — Issue 010 + 009：执行层 LLM 重试 + Skill 可观测性
+
+**修复文件**：`backend/llm_invoker.py`（新增）、`backend/entity_extractor.py`、`backend/skills/entity_extract.py`、`backend/routes/chat.py`、`backend/skill_manager.py`
+
+- **新增** `backend/llm_invoker.py`：统一 LLM 调用封装
+  - `safe_llm_call` / `safe_llm_call_sync`：自动重试 3 次，指数退避（1s/2s/4s）
+  - 识别 agno 框架"伪成功"（`RunOutput.status == ERROR`、"Request timed out." 等已知错误字符串前缀）
+  - 重试耗尽后抛出 `LLMCallError(reason, attempts)`，禁止伪装成"成功 0 实体"
+- **重写** `entity_extractor.py`：改用 `safe_llm_call_sync`，结果新增 `status` 三态（`ok`/`failed`/`parse_error`）
+- **重写** `skills/entity_extract.py`：
+  - 合并跨项目全局缓存（已抽取文档不重复调用 LLM）
+  - 完整生命周期日志：`[SKILL:entity_extract] start/cached/extracting/completed/failed/skipped/done`
+  - 新增 `progress_cb(current, total, label, status)` 回调接口
+  - 单文件失败不阻塞其他文件，最终消息显式列出失败列表
+- **新增** SSE 进度桥接：`asyncio.Queue` + `loop.call_soon_threadsafe` 将 worker 线程进度推送到 SSE 流
+- 守护测试：`test_llm_invoker.py`（13 条）+ `test_entity_extractor_uses_safe_llm.py`（7 条）+ `test_entity_extract_skill.py`（13 条）
+
+---
+
+### Wave 3 — Issue 001 + 008：LLM 动态 Skill 生成 + 排除意图 LLM 解析
+
+**修复文件**：`backend/routes/chat.py`、`backend/skills/entity_exclude.py`（新增）
+
+- **删除** `_CAPABILITY_TEMPLATES` 硬编码 Skill 模板字典（entity_extract / entity_exclude 两个固定模板）
+- **重写** `_handle_create_skill`：LLM 动态生成完整 Python Skill 代码
+  - `ast.parse` 语法校验
+  - 检查 `SKILL_META` + `run()` 结构完整性
+  - 写入 `SKILLS_DIR` 并调用 `scan_skills()` 注册
+- **新增** `_parse_exclusion_intent`：LLM 解析实体排除/恢复意图，输出 `{action, source}` JSON
+- **新增** `backend/skills/entity_exclude.py` Skill：内部完全通过 LLM 解析意图，无任何正则或关键词
+- 守护测试：`test_handle_create_skill_is_llm_driven.py`（9 条）+ `test_entity_exclusion_no_regex.py`（10 条）
+
+---
+
+### Wave 3.5 — Issue 011：前端 SSE Progress 进度条渲染
+
+**修复文件**：`src/services/api.ts`、`src/components/ProjectChat.tsx`
+
+- `TeamChatEvent` 接口新增 `progress` 和 `heartbeat` 事件类型，`progress` 携带 `current` / `total` / `label` 字段
+- `ProjectChat.tsx` 新增 `progressMap` state（`Record<slot_id, SubTaskProgress>`）
+- `SubTaskCard` 组件扩展：status=working 时渲染蓝色进度条 + 百分比 + 当前文件标签
+- `plan_created` 时清空 `progressMap`，`subtask_completed` 时移除对应 slot 记录
+- `heartbeat` 事件静默忽略（保持 SSE 连接）
+
+---
+
+### Wave 4 — Issue 002 + 004：规则学习层
+
+**修复文件**：`backend/database.py`、`backend/rule_manager.py`（新增）、`backend/routes/chat.py`、`backend/entity_extractor.py`
+
+- **新增** `extraction_rules` 数据库表：按 `project_id` 持久化用户教给系统的抽取规则
+- **新增** `backend/rule_manager.py`：
+  - `parse_rule_from_feedback`：LLM 解析用户反馈为结构化规则
+  - `save_rule` / `load_rules`：规则持久化读写
+  - `rules_to_prompt_text` / `build_extraction_exclusion_text`：将规则转为 LLM prompt 文本
+- **新增** `rule_learning` 意图类别：用户说"不要抽取 X"被 LLM 识别并保存为规则
+- **修改** `entity_extractor.py`：每次抽取前加载规则，注入 `_EXTRACT_SYSTEM_PROMPT`
+- **修改** `_run_entity_exclusion_sync`：排除操作后自动保存 `exclude_source` 规则（恢复操作不保存）
+- 守护测试：`test_rule_manager.py`（12 条）+ `test_rule_learning_intent.py`（7 条）+ `test_extraction_applies_rules.py`（4 条）+ `test_entity_exclusion_learns_rule.py`（3 条）
+
+---
+
+### Wave 5 — Issue 003 + 012：自适应抽取 + 缓存失效
+
+**修复文件**：`backend/rule_manager.py`、`backend/skills/entity_extract.py`
+
+- **扩展** `rule_manager`：支持 `focus_on`（重点抽取）和 `strategy`（策略引导）正向规则类型，`build_extraction_exclusion_text` 同时注入负向（排除）和正向（引导）规则
+- **修复缓存失效**：`entity_extract` Skill 在构建 `global_cache` 前调用 `load_rules`，若项目有学习规则则强制跳过缓存，确保新规则对已缓存文档立即生效；日志打印 `[SKILL:entity_extract] project has N rule(s), bypassing cache`
+- 守护测试：`test_adaptive_extraction.py`（6 条）+ `test_cache_invalidation_on_rules.py`（4 条）
+
+---
+
+### Wave 6 — Issue 007：动态意图注册表
+
+**修复文件**：`backend/routes/chat.py`、`backend/skills/entity_extract.py`、`backend/skills/entity_exclude.py`
+
+- **删除** 硬编码 `_CLASSIFY_PROMPT` 常量和 `_VALID_INTENTS` 元组
+- **新增** `_CORE_INTENTS` dict（4 类永久内置意图）
+- **新增** `build_intent_registry()`：合并核心意图 + 扫描 `_skill_registry` 各 Skill 的 `SKILL_META.intent`，动态生成完整意图注册表
+- **新增** `build_classify_prompt(simplified=False)`：从注册表动态生成 LLM 分类 prompt
+- **新增** 通用 Skill 意图分发路径（`skill_intent_map`）：新增 Skill 只需在 `SKILL_META` 中声明 `intent`，无需修改 `orchestrator_chat`
+- `entity_extract.py` 和 `entity_exclude.py` 的 `SKILL_META` 新增 `intent` / `intent_description` 字段
+- 守护测试：`test_dynamic_intent_registry.py`（10 条）
+
+---
+
+### 补丁修复
+
+**`backend/llm.py`**：`create_model()` 自动检测 Kimi 模型（含 `provider: custom` 场景），注入 `extra_body: {"thinking": {"type": "disabled"}}`，解决多轮工具调用时 `reasoning_content missing` 报错
+
+**`backend/routes/chat.py`**：
+- `_stream_biz_direct` 捕获 thinking 相关错误后以独立 session_id 重试，避免错误消息直接暴露给用户
+- **删除** `_extract_doc_name`（3 条硬编码正则 + 文件名子串遍历），替换为 `_extract_doc_name_llm`（LLM 识别目标文档名，知识库文件列表作为候选，无法提取时返回 `null` 处理全部文档）
+
+**`src/components/WorkflowPanel.tsx`**：重设计编排工作流 UI
+- 默认仅显示 `WorkAgent · 就绪` 单行
+- 任务执行时显示绿色脉冲 `协调中` 状态
+- 数字员工卡片仅在状态非 idle 时动态出现（按实际激活数量自适应 1-3 列）
+
+**`src/components/Dashboard.tsx`**：项目消耗排行数据归零（移除 `Math.random()` mock 数据）
+
+---
+
+### 测试与文档
+
+- 新增 `docs/test-guides/ALL_ISSUES_REGRESSION_SUMMARY_v0.1.0.md`：全 12 Issue 回归测试场景汇总（含自动化回归命令 `pytest` 111 条测试）
+- 新增 `docs/test-guides/ISSUE_005-006_v0.1.0_REGRESSION_GUIDE.md`、`ISSUE_001-008_v0.1.0_REGRESSION_GUIDE.md`、`ISSUE_002-004_v0.1.0_REGRESSION_GUIDE.md`、`ISSUE_009-010_v0.1.0_REGRESSION_GUIDE.md`：各 Wave 人工回归测试指导
+- 新增 `docs/KNOWN_ISSUES.md`、`docs/FEATURE_LIST.md`、`docs/README.md`、`docs/features/F001_AgentOS大模型驱动的任务执行架构.md`、`docs/analysis/DRIFT_REPORT_2026-05-06.md`：系统化问题追踪与架构文档
+
+---
+
 ## [2026-04-30] 修复部署环境线程耗尽导致启动崩溃
 
 ### 问题现象

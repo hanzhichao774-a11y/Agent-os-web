@@ -123,7 +123,7 @@ export default function Dashboard() {
 
   const projectTokens = projects.map(p => ({
     name: p.name,
-    tokens: Math.floor(Math.random() * 300 + 50) * 1000,
+    tokens: 0,
   })).sort((a, b) => b.tokens - a.tokens);
 
   const maxProjectTokens = Math.max(...projectTokens.map(p => p.tokens), 1);

@@ -64,6 +64,15 @@ def _get_llm_config() -> dict:
     }
 
 
+def _is_kimi_model(model_id: str, base_url: str) -> bool:
+    """判断是否为 Kimi (Moonshot) 模型，无论 provider 配置为何。"""
+    if base_url and "moonshot.cn" in base_url:
+        return True
+    if model_id and model_id.lower().startswith("kimi"):
+        return True
+    return False
+
+
 def create_model():
     from agno.models.openai import OpenAIChat
 
@@ -78,5 +87,14 @@ def create_model():
         kwargs["api_key"] = api_key
     if base_url:
         kwargs["base_url"] = base_url
+
+    # 先应用 provider 级别的 extra kwargs
     kwargs.update(_PROVIDER_EXTRA_KWARGS.get(provider, {}))
+
+    # 若为 Kimi 模型（通过 custom provider 配置时 provider!="kimi"，需兜底处理），
+    # 自动禁用 extended thinking，防止 agno 工具调用多轮时 reasoning_content 丢失报 400
+    if _is_kimi_model(model_id, base_url or ""):
+        kwargs.setdefault("extra_body", {"thinking": {"type": "disabled"}})
+        kwargs.setdefault("role_map", _COMPAT_ROLE_MAP)
+
     return OpenAIChat(**kwargs)
